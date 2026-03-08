@@ -42,48 +42,19 @@ function Show-MatrixCLI {
 function Process-AssistantMessageCLI {
     param($assistantMsg)
     
-    $textOutput = ""
-    $toolsCalled = @()
+    $result = Invoke-MatrixToolchain -MessageContent $assistantMsg.content
     
-    if ($assistantMsg.content) {
-        foreach ($content in $assistantMsg.content) {
-            if ($content.type -eq "text") {
-                $textOutput += $content.text + "`n"
-            } elseif ($content.type -eq "tool_use") {
-                $toolsCalled += $content
-                $textOutput += "[Tool Call: $($content.name)]`n"
-            }
-        }
+    if (-not [string]::IsNullOrWhiteSpace($result.TextOutput)) {
+        Write-Host $result.TextOutput
     }
     
-    if (-not [string]::IsNullOrWhiteSpace($textOutput)) {
-        Write-Host $textOutput.Trim()
-        Write-MatrixLog -Message "Assistant Text: $($textOutput.Trim())"
-    }
-    
-    if ($toolsCalled.Count -gt 0) {
-        $toolResults = @()
-        foreach ($tc in $toolsCalled) {
+    if ($result.HasTools) {
+        foreach ($tc in $result.ToolsCalled) {
             Write-Host "[Executing tool $($tc.name)...]" -ForegroundColor DarkCyan
-            
-            $argsHash = @{}
-            if ($tc.input -and $tc.input -isnot [string]) {
-                foreach ($key in $tc.input.psobject.properties.name) {
-                    $argsHash[$key] = $tc.input.$key
-                }
-            }
-            
-            $toolRes = Invoke-MatrixTool -ToolName $tc.name -InputArgs $argsHash
-            
-            $toolResults += @{
-                type = "tool_result"
-                tool_use_id = $tc.id
-                content = $toolRes
-            }
         }
         
-        Add-Message -Role "user" -Content $toolResults
-        Write-MatrixLog -Message "Sending tool results: $($toolResults | ConvertTo-Json -Compress)"
+        Add-Message -Role "user" -Content $result.ToolResults
+        Write-MatrixLog -Message "Sending tool results: $($result.ToolResults | ConvertTo-Json -Compress)"
         Write-Host "[Sending tool results back...]" -ForegroundColor DarkGray
         
         $tools = Get-MatrixTools

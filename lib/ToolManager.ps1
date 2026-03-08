@@ -1,7 +1,8 @@
 
 
 function Get-MatrixTools {
-    $pluginsDir = Join-Path $global:MatrixRoot "plugins"
+    $root = if ($global:MatrixRoot) { $global:MatrixRoot } else { Split-Path -Parent $PSScriptRoot }
+    $pluginsDir = Join-Path $root "plugins"
     Write-MatrixLog -Message "Scanning plugins in: $pluginsDir"
     if (-not (Test-Path $pluginsDir)) { 
         Write-MatrixLog -Level "WARN" -Message "Plugins directory not found!"
@@ -47,7 +48,7 @@ function Get-MatrixTools {
                     if ($p.Attributes) {
                         foreach ($attr in $p.Attributes) {
                             if ($attr.TypeName.Name -match "Parameter") {
-                                if ($attr.Extent.Text -match "Mandatory\s*=\s*\`?\$true") {
+                                if ($attr.Extent.Text -match 'Mandatory\s*=\s*\$true') {
                                     $required += $pName
                                 }
                             }
@@ -61,7 +62,7 @@ function Get-MatrixTools {
                 description = $synopsis
                 input_schema = @{
                     type = "object"
-                    properties = $properties
+                    properties = if ($properties.Count -gt 0) { $properties } else { @{} }
                 }
             }
             

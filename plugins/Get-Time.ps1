@@ -3,7 +3,7 @@
 Gets the current system time and timezone.
 
 .DESCRIPTION
-This tool determines the local system's date, time, and timezone information. It should be used whenever the user asks for the current time or date.
+This tool determines the local system's date, time, and timezone information. ONLY USE THIS TOOL if the user explicitly asks "What time is it" or "What is today's date". DO NOT use this tool to add context to other queries.
 #>
 [CmdletBinding()]
 param()

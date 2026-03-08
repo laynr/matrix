@@ -5,3 +5,4 @@ config.json
 .agent/
 _agents/
 _agent/
+err.log

@@ -7,18 +7,41 @@ function Show-MatrixGUI {
     [xml]$xaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Matrix AI Agent" Height="600" Width="800" Background="#1E1E1E" WindowStartupLocation="CenterScreen">
-    <Grid Margin="10">
+        Title="Matrix" Height="650" Width="850" Background="#121212" WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="6" BorderThickness="0">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="12">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         
-        <ScrollViewer x:Name="ChatScrollViewer" Grid.Row="0" Margin="0,0,0,10" VerticalScrollBarVisibility="Auto">
-            <StackPanel x:Name="ChatPanel" />
-        </ScrollViewer>
+        <!-- Header area for Token Tracking -->
+        <Grid Grid.Row="0" Margin="0,0,0,10">
+            <TextBlock x:Name="TokenTracker" Text="Tokens: 0 In | 0 Out" Foreground="#888888" FontSize="12" HorizontalAlignment="Right" VerticalAlignment="Center" />
+            <TextBlock Text="Matrix" Foreground="#E0E0E0" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Left" VerticalAlignment="Center" />
+        </Grid>
+
+        <Border Grid.Row="1" Background="#1E1E1E" CornerRadius="8" Margin="0,0,0,15" Padding="5">
+            <ScrollViewer x:Name="ChatScrollViewer" VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="ChatPanel" Margin="5" />
+            </ScrollViewer>
+        </Border>
         
-        <Grid Grid.Row="1">
+        <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
@@ -26,13 +49,18 @@ function Show-MatrixGUI {
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             
-            <Button x:Name="AttachBtn" Grid.Column="0" Width="35" Height="35" Margin="0,0,5,0" Background="#333" BorderThickness="0" ToolTip="Attach File">
-                <Image x:Name="AttachIcon" Width="20" Height="20" />
+            <Button x:Name="AttachBtn" Grid.Column="0" Width="40" Height="40" Margin="0,0,8,0" Background="#4B5563" ToolTip="Attach File">
+                <Image x:Name="AttachIcon" Width="22" Height="22" />
             </Button>
-            <TextBox x:Name="InputBox" Grid.Column="1" Height="35" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Background="#333" Foreground="White" BorderThickness="0" Padding="5" FontSize="14" />
-            <Button x:Name="SendBtn" Grid.Column="2" Content="Send" Width="60" Height="35" Margin="5,0,0,0" Background="#4CAF50" Foreground="White" BorderThickness="0" FontSize="14" FontWeight="Bold"/>
-            <Button x:Name="SettingsBtn" Grid.Column="3" Width="35" Height="35" Margin="5,0,0,0" Background="#333" BorderThickness="0" ToolTip="Settings">
-                <Image x:Name="SettingsIcon" Width="20" Height="20" />
+            
+            <Border Grid.Column="1" Background="#2D2D2D" CornerRadius="8" Padding="2">
+                <TextBox x:Name="InputBox" Height="40" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Background="Transparent" Foreground="#E0E0E0" BorderThickness="0" Padding="8,10,8,10" FontSize="14" />
+            </Border>
+            
+            <Button x:Name="SendBtn" Grid.Column="2" Content="Send" Width="70" Height="40" Margin="8,0,0,0" Background="#3B82F6" Foreground="White" FontSize="14" FontWeight="SemiBold"/>
+            
+            <Button x:Name="SettingsBtn" Grid.Column="3" Width="40" Height="40" Margin="8,0,0,0" Background="#4B5563" ToolTip="Settings">
+                <Image x:Name="SettingsIcon" Width="22" Height="22" />
             </Button>
         </Grid>
     </Grid>
@@ -50,6 +78,7 @@ function Show-MatrixGUI {
         SendBtn = $window.FindName("SendBtn")
         AttachBtn = $window.FindName("AttachBtn")
         SettingsBtn = $window.FindName("SettingsBtn")
+        TokenTracker = $window.FindName("TokenTracker")
     }
     
     $script:GUI = $global:GUI
@@ -81,7 +110,7 @@ function Show-MatrixGUI {
         $window.FindName("SettingsIcon").Source = New-Object System.Windows.Media.Imaging.BitmapImage(New-Object Uri($settingsIconPath))
     }
 
-    Add-UIChatMessage -Role "system" -Message "Welcome to Matrix AI Agent. Ready."
+    Add-UIChatMessage -Role "system" -Message "Welcome to Matrix. Ready."
     
     $window.ShowDialog() | Out-Null
 }
@@ -89,14 +118,15 @@ function Show-MatrixGUI {
 function Add-UIChatMessage {
     param([string]$Role, [string]$Message)
     
-    $color = if ($Role -eq "user") { "#4A90E2" } elseif ($Role -eq "system") { "#888888" } else { "#50C878" }
+    # Modern color palette based on Claude Code / Tailwind gray scales
+    $color = if ($Role -eq "user") { "#3B82F6" } elseif ($Role -eq "system") { "#3F3F46" } else { "#10B981" }
     $alignment = if ($Role -eq "user") { "Right" } else { "Left" }
-    $margin = if ($Role -eq "user") { "50,5,5,5" } else { "5,5,50,5" }
+    $margin = if ($Role -eq "user") { "50,6,8,6" } else { "8,6,50,6" }
     
     $border = New-Object System.Windows.Controls.Border
     $border.Background = (New-Object System.Windows.Media.BrushConverter).ConvertFromString($color)
-    $border.CornerRadius = New-Object System.Windows.CornerRadius(8)
-    $border.Padding = New-Object System.Windows.Thickness(10)
+    $border.CornerRadius = New-Object System.Windows.CornerRadius(12)
+    $border.Padding = New-Object System.Windows.Thickness(14, 10, 14, 10)
     $marginParts = $margin -split ','
     $border.Margin = New-Object System.Windows.Thickness([double]$marginParts[0], [double]$marginParts[1], [double]$marginParts[2], [double]$marginParts[3])
     $border.HorizontalAlignment = $alignment
@@ -106,6 +136,8 @@ function Add-UIChatMessage {
     $textBlock.TextWrapping = "Wrap"
     $textBlock.Foreground = [System.Windows.Media.Brushes]::White
     $textBlock.FontSize = 14
+    $textBlock.LineHeight = 22
+    $textBlock.FontFamily = New-Object System.Windows.Media.FontFamily("Segoe UI, Inter, Arial")
     
     $border.Child = $textBlock
     $global:GUI.ChatPanel.Children.Add($border) | Out-Null
@@ -116,7 +148,7 @@ function Show-SettingsGUI {
     [xml]$settingsXaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Settings" Height="380" Width="400" Background="#1E1E1E" WindowStartupLocation="CenterOwner">
+        Title="Settings" Height="450" Width="400" Background="#1E1E1E" WindowStartupLocation="CenterOwner">
     <StackPanel Margin="10">
         <TextBlock Text="API Provider:" Foreground="White" Margin="0,5,0,0"/>
         <TextBox x:Name="ProviderBox" Background="#333" Foreground="White" BorderThickness="0" Padding="5"/>

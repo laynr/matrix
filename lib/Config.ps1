@@ -20,7 +20,7 @@ function Load-Config {
         Provider     = "Anthropic"
         Model        = "claude-3-5-sonnet-20241022"
         ApiKey       = ""
-        SystemPrompt = "You are Matrix, an intelligent AI assistant. Use your tools and skills natively for maximum effectiveness. You are compatible with Claude Code plugins."
+        SystemPrompt = "You are Matrix. Use tools strictly when required to fulfill the user's specific request. Do NOT call Get-Time unless the user explicitly asks for the time. Evaluate available tools carefully."
         Endpoint     = "https://api.anthropic.com/v1/messages"
     }
 }
