@@ -1,0 +1,7 @@
+config.json
+*.log
+.gemini/
+.agents/
+.agent/
+_agents/
+_agent/
