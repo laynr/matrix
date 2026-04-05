@@ -1,46 +1,46 @@
-# Matrix AI Agent
+# Matrix
 
-Matrix is a high-performance, intelligent AI assistant built entirely in PowerShell 5.1. It features a modern WPF GUI, a versatile CLI, and a powerful plugin system that allows the AI to interact directly with your system using PowerShell scripts.
+An AI agent that runs on **Mac**, **Linux**, and **Windows**. One command installs the right version for your platform.
 
-## Features
+## Install
 
-- **Modern WPF GUI**: A sleek, dark-themed interface with file attachment support and real-time chat.
-- **Versatile CLI**: A lightweight command-line interface for fast interactions and automation.
-- **PowerShell Plugin System**: Native tool calling support using `.ps1` files. (e.g., `Get-Time` is included by default).
-- **Context Management**: Automatic message history pruning to stay within model token limits.
-- **Anthropic Claude Integration**: Optimized for Claude 3.5 Sonnet and Haiku.
-
-## Quick Start
-
-### Prerequisites
-- Windows PowerShell 5.1
-- An Anthropic API Key
-
-### Installation
-1. Clone the repository:
-   ```powershell
-   git clone https://github.com/yourusername/matrix.git
-   cd matrix
-   ```
-2. Run the agent:
-   ```powershell
-   .\Matrix.ps1
-   ```
-3. Set your API Key in the **Settings** (gear icon) on first run.
-
-### CLI Mode
-To run in terminal mode:
-```powershell
-.\Matrix.ps1 -CLI
+### Mac / Linux
+```sh
+curl -fsSL https://raw.githubusercontent.com/laynr/matrix/main/install.sh | sh
 ```
 
-## Plugin Development
-Matrix discovers tools by parsing `.ps1` scripts in the `plugins/` directory. Each script is automatically converted into a Claude-compatible tool schema using AST parsing.
+### Windows (PowerShell)
+```powershell
+irm https://raw.githubusercontent.com/laynr/matrix/main/install.ps1 | iex
+```
 
-To add a new tool:
-1. Create a script in `plugins/Your-Tool.ps1`.
-2. Use standard PowerShell parameters and help comments (Synopsis).
-3. The AI will automatically discover and know how to call it!
+After install, just run:
+```
+matrix
+```
 
-## License
-MIT
+## Platform ports
+
+| Platform | Repo | Runtime | Backend |
+|----------|------|---------|---------|
+| Mac / Linux | [matrix.py](https://github.com/laynr/matrix.py) | Python 3 | Ollama + gemma4 |
+| Windows | [matrix.ps1](https://github.com/laynr/matrix.ps1) | PowerShell 5.1 | Anthropic Claude |
+
+The meta-installer in this repo detects your OS and delegates to the appropriate port. Each port is maintained in its own repo.
+
+## What it does
+
+Matrix is a local AI agent with a dynamic tool system:
+
+- **Mac/Linux** — talks to a local Ollama instance running gemma4. Tools are Python files dropped into a `tools/` directory.
+- **Windows** — talks to the Anthropic Claude API. Tools are PowerShell scripts dropped into a `plugins/` directory.
+
+Both versions reload tools at runtime — no restart needed.
+
+## Architecture
+
+```
+laynr/matrix          ← you are here (meta-installer, cross-platform entry point)
+├── laynr/matrix.py   ← Mac / Linux (Python + Ollama)
+└── laynr/matrix.ps1  ← Windows (PowerShell + Claude)
+```
