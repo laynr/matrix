@@ -1,131 +1,98 @@
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+# Calls the Ollama chat API and returns the raw response object.
+# Response shape: { model, message: { role, content, tool_calls }, done }
 function Invoke-MatrixChat {
     param(
         [hashtable]$Config,
         [array]$Messages,
         [array]$Tools
     )
-    
-    $providerName = [string]$Config.Provider
-    if ($providerName -eq "Anthropic") {
-        $headers = @{
-            "x-api-key" = $Config.ApiKey
-            "anthropic-version" = "2023-06-01"
-            "content-type" = "application/json"
-        }
-        
-        $bodyObj = @{
-            model = $Config.Model
-            max_tokens = 4096
-            system = $Config.SystemPrompt
-            messages = $Messages
-        }
-        
-        if ($Tools -and $Tools.Count -gt 0) {
-            Write-MatrixLog -Message "Passing $($Tools.Count) tools to bodyObj"
-            $filteredTools = $Tools | Where-Object { $null -ne $_ -and $_ -is [hashtable] }
-            if ($filteredTools) {
-                $bodyObj.tools = @($filteredTools)
-            } else {
-                Write-MatrixLog -Level "WARN" -Message "All tools were filtered out!"
-            }
-        } else {
-            Write-MatrixLog -Message "No tools provided to Invoke-MatrixChat"
-        }
-        
-        $bodyJson = $bodyObj | ConvertTo-Json -Depth 10 -Compress
-        
-        Write-MatrixLog -Message "NETWORK REQUEST: $bodyJson"
-        
+
+    $body = @{
+        model    = $Config.Model
+        messages = $Messages
+        stream   = $false
+    }
+
+    if ($Tools -and $Tools.Count -gt 0) {
+        $body.tools = $Tools
+    }
+
+    $bodyJson = $body | ConvertTo-Json -Depth 10 -Compress
+    Write-MatrixLog -Message "REQUEST: $bodyJson"
+
+    try {
+        $response = Invoke-RestMethod `
+            -Uri         $Config.Endpoint `
+            -Method      Post `
+            -ContentType "application/json" `
+            -Body        $bodyJson
+        Write-MatrixLog -Message "RESPONSE: $($response | ConvertTo-Json -Depth 6 -Compress)"
+        return $response
+    } catch {
+        $errMsg = $_.Exception.Message
         try {
-            $response = Invoke-RestMethod -Uri $Config.Endpoint -Method Post -Headers $headers -Body $bodyJson
-            $respJson = $response | ConvertTo-Json -Depth 5 -Compress
-            Write-MatrixLog -Message "NETWORK RESPONSE: $respJson"
-            return $response
-        } catch {
-            $errMsg = $_.Exception.Response.GetResponseStream()
-            if ($errMsg) {
-                $reader = New-Object System.IO.StreamReader($errMsg)
-                $errBody = $reader.ReadToEnd()
-                Write-MatrixLog -Level "ERROR" -Message "NETWORK ERROR: $errBody"
-                return @{ error = $errBody; status = "error" }
+            $stream = $_.Exception.Response.GetResponseStream()
+            if ($stream) {
+                $reader = [System.IO.StreamReader]::new($stream)
+                $errMsg = $reader.ReadToEnd()
             }
-            Write-MatrixLog -Level "ERROR" -Message "NETWORK ERROR: $($_.Exception.Message)"
-            return @{ error = $_.Exception.Message; status = "error" }
-        }
-    } else {
-        # Framework for OpenAI or others
-        throw "Provider $($Config.Provider) not yet fully implemented in Network.ps1"
+        } catch {}
+        Write-MatrixLog -Level "ERROR" -Message "NETWORK ERROR: $errMsg"
+        return @{ error = $errMsg }
     }
 }
 
+# Parses an Ollama message object, executes any tool calls, and returns
+# the text output plus tool result messages ready to append to history.
 function Invoke-MatrixToolchain {
     param(
-        [array]$MessageContent
+        [object]$Message   # Ollama message: { role, content, tool_calls }
     )
-    
-    $textOutput = ""
+
+    $textOutput  = [string]$Message.content
     $toolsCalled = @()
     $toolResults = @()
-    $hasTools = $false
+    $hasTools    = $false
 
-    if ($MessageContent) {
-        foreach ($content in $MessageContent) {
-            if ($content.type -eq "text") {
-                $textOutput += $content.text + "`n"
-            } elseif ($content.type -eq "tool_use") {
-                $toolsCalled += $content
-                $textOutput += "[Tool Call: $($content.name)]`n"
-                $hasTools = $true
-            }
+    if ($Message.tool_calls) {
+        $hasTools    = $true
+        $toolsCalled = @($Message.tool_calls)
+    }
+
+    foreach ($tc in $toolsCalled) {
+        $name = $tc.function.name
+        $rawArgs = $tc.function.arguments
+
+        # arguments may arrive as a PSCustomObject, hashtable, or JSON string
+        $argsHash = @{}
+        if ($rawArgs -is [string] -and $rawArgs.Trim() -ne "") {
+            try {
+                $parsed = $rawArgs | ConvertFrom-Json
+                $parsed.PSObject.Properties | ForEach-Object { $argsHash[$_.Name] = [string]$_.Value }
+            } catch {}
+        } elseif ($rawArgs -and $rawArgs.PSObject) {
+            $rawArgs.PSObject.Properties | ForEach-Object { $argsHash[$_.Name] = [string]$_.Value }
         }
-    }
-    
-    if (-not [string]::IsNullOrWhiteSpace($textOutput)) {
-        Write-MatrixLog -Message "Assistant Text: $($textOutput.Trim())"
-    }
-    
-    if ($hasTools) {
-        foreach ($tc in $toolsCalled) {
-            $argsHash = @{}
-            $argLog = ""
-            if ($null -ne $tc.input -and $tc.input -isnot [string]) {
-                $propNames = ($tc.input | Get-Member -MemberType NoteProperty).Name
-                if ($propNames) {
-                    foreach ($pName in $propNames) {
-                        try {
-                            $argsHash[$pName] = [string]$tc.input.$pName
-                            $argLog += "$pName=$($argsHash[$pName]) "
-                        } catch {
-                            $argLog += "$pName=<Error> "
-                        }
-                    }
-                }
-            }
-            
-            Write-MatrixLog -Message "Invoking Tool: $($tc.name) Args: $argLog"
-            
-            $toolRes = Invoke-MatrixTool -ToolName $tc.name -InputArgs $argsHash
-            
-            $toolResults += @{
-                type = "tool_result"
-                tool_use_id = $tc.id
-                content = $toolRes
-            }
-            Write-MatrixLog -Message "Tool Result ($($tc.name)): $toolRes"
+
+        Write-MatrixLog -Message "Invoking tool: $name  args: $($argsHash | ConvertTo-Json -Compress)"
+        $result = Invoke-MatrixTool -ToolName $name -InputArgs $argsHash
+        Write-MatrixLog -Message "Tool result ($name): $result"
+
+        Write-Host "  [tool] $name" -ForegroundColor DarkCyan
+        Write-Host "  [result] $result" -ForegroundColor DarkGray
+
+        $toolResults += @{
+            role    = "tool"
+            content = $result
         }
-    }
-    
-    $outToolResults = $null
-    if ($hasTools) {
-        $outToolResults = $toolResults
     }
 
     return @{
-        TextOutput = $textOutput.Trim()
-        ToolResults = $outToolResults
-        HasTools = $hasTools
-        ToolsCalled = $toolsCalled
+        TextOutput   = $textOutput
+        ToolResults  = $toolResults
+        HasTools     = $hasTools
+        ToolsCalled  = $toolsCalled
     }
 }

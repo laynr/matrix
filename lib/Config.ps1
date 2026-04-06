@@ -2,34 +2,28 @@ function Load-Config {
     $configPath = Join-Path $PSScriptRoot "..\config.json"
     if (Test-Path $configPath) {
         try {
-            $jsonItems = @(Get-Content $configPath -Raw | ConvertFrom-Json)
-            $json = $jsonItems[0]
+            $json = Get-Content $configPath -Raw | ConvertFrom-Json
             return @{
-                Provider     = $json.Provider
-                Model        = $json.Model
-                ApiKey       = $json.ApiKey
-                SystemPrompt = $json.SystemPrompt
-                Endpoint     = $json.Endpoint
+                Provider     = [string]$json.Provider
+                Model        = [string]$json.Model
+                Endpoint     = [string]$json.Endpoint
+                SystemPrompt = [string]$json.SystemPrompt
             }
         } catch {
-            Write-Warning "Failed to parse config.json. Using defaults. $_"
+            Write-Warning "Failed to parse config.json — using defaults. $_"
         }
     }
-    
+
     return @{
-        Provider     = "Anthropic"
-        Model        = "claude-3-5-sonnet-20241022"
-        ApiKey       = ""
-        SystemPrompt = "You are Matrix. Use tools strictly when required to fulfill the user's specific request. Do NOT call Get-Time unless the user explicitly asks for the time. Evaluate available tools carefully."
-        Endpoint     = "https://api.anthropic.com/v1/messages"
+        Provider     = "Ollama"
+        Model        = "gemma4:latest"
+        Endpoint     = "http://localhost:11434/api/chat"
+        SystemPrompt = "You are Matrix, a helpful AI agent. Use the tools available to you when they are needed to answer the user. Be concise and direct."
     }
 }
 
 function Save-Config {
-    param(
-        [Parameter(Mandatory=$true)]
-        [hashtable]$Config
-    )
+    param([hashtable]$Config)
     $configPath = Join-Path $PSScriptRoot "..\config.json"
     $Config | ConvertTo-Json -Depth 5 | Set-Content $configPath -Encoding UTF8
 }

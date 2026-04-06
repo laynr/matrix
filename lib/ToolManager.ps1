@@ -1,100 +1,99 @@
-
+# Discovers tools from the tools/ directory and builds Ollama-compatible schemas.
+# Each tool is a .ps1 file. The function name = file basename.
+# Parameters and .SYNOPSIS are parsed via PowerShell AST.
 
 function Get-MatrixTools {
-    $root = if ($global:MatrixRoot) { $global:MatrixRoot } else { Split-Path -Parent $PSScriptRoot }
-    $pluginsDir = Join-Path $root "plugins"
-    Write-MatrixLog -Message "Scanning plugins in: $pluginsDir"
-    if (-not (Test-Path $pluginsDir)) { 
-        Write-MatrixLog -Level "WARN" -Message "Plugins directory not found!"
-        return @() 
+    $root      = if ($global:MatrixRoot) { $global:MatrixRoot } else { Split-Path -Parent $PSScriptRoot }
+    $toolsDir  = Join-Path $root "tools"
+
+    Write-MatrixLog -Message "Scanning tools in: $toolsDir"
+
+    if (-not (Test-Path $toolsDir)) {
+        Write-MatrixLog -Level "WARN" -Message "tools/ directory not found at $toolsDir"
+        return @()
     }
-    
-    $scripts = Get-ChildItem -Path $pluginsDir -Filter "*.ps1"
-    Write-MatrixLog -Message "Found $($scripts.Count) potential plugin scripts."
-    
+
+    $scripts = Get-ChildItem -Path $toolsDir -Filter "*.ps1"
+    Write-MatrixLog -Message "Found $($scripts.Count) tool script(s)"
+
     $discovered = foreach ($script in $scripts) {
         try {
-            $tokens = $null
-            $errors = $null
-            $ast = [System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$tokens, [ref]$errors)
-            
+            $tokens = $null; $errors = $null
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+                $script.FullName, [ref]$tokens, [ref]$errors
+            )
             if ($null -eq $ast) { continue }
-            
-            $synopsis = "Plugin tool: $($script.BaseName)"
-            $parsedHelp = $ast.GetHelpContent()
-            if ($null -ne $parsedHelp -and $null -ne $parsedHelp.Synopsis) { 
-                $synopsis = $parsedHelp.Synopsis.Trim()
-            }
-            
-            $paramBlock = $ast.ParamBlock
-            $properties = @{}
-            $required = @()
-            
-            if ($paramBlock) {
-                foreach ($p in $paramBlock.Parameters) {
+
+            # Description from .SYNOPSIS
+            $description = "Tool: $($script.BaseName)"
+            $help = $ast.GetHelpContent()
+            if ($help -and $help.Synopsis) { $description = $help.Synopsis.Trim() }
+
+            # Parameters
+            $properties = [ordered]@{}
+            $required   = @()
+
+            if ($ast.ParamBlock) {
+                foreach ($p in $ast.ParamBlock.Parameters) {
                     $pName = $p.Name.VariablePath.UserPath
-                    $pType = "string" 
+
+                    $pType = "string"
                     if ($p.StaticType) {
-                        $typeName = $p.StaticType.Name.ToLower()
-                        if ($typeName -match "int|double|long") { $pType = "number" }
-                        elseif ($typeName -match "bool") { $pType = "boolean" }
+                        $t = $p.StaticType.Name.ToLower()
+                        if ($t -match "int|double|long|float") { $pType = "number" }
+                        elseif ($t -match "bool|switch")        { $pType = "boolean" }
                     }
-                    
-                    $properties[$pName] = @{
-                        type = $pType
-                        description = "Parameter $pName"
+
+                    # Grab per-parameter description from .PARAMETER help block
+                    $pDesc = "Parameter $pName"
+                    if ($help -and $help.Parameters -and $help.Parameters[$pName]) {
+                        $pDesc = $help.Parameters[$pName].Trim()
                     }
-                    
-                    if ($p.Attributes) {
-                        foreach ($attr in $p.Attributes) {
-                            if ($attr.TypeName.Name -match "Parameter") {
-                                if ($attr.Extent.Text -match 'Mandatory\s*=\s*\$true') {
-                                    $required += $pName
-                                }
-                            }
+
+                    $properties[$pName] = @{ type = $pType; description = $pDesc }
+
+                    foreach ($attr in @($p.Attributes)) {
+                        if ($attr.TypeName.Name -match "Parameter" -and
+                            $attr.Extent.Text -match 'Mandatory\s*=\s*\$true') {
+                            $required += $pName
                         }
                     }
                 }
             }
-            
-            $schema = @{
-                name = $script.BaseName
-                description = $synopsis
-                input_schema = @{
-                    type = "object"
-                    properties = if ($properties.Count -gt 0) { $properties } else { @{} }
+
+            # Ollama / OpenAI function-calling schema
+            $params = @{ type = "object"; properties = $properties }
+            if ($required.Count -gt 0) { $params.required = [array]$required }
+
+            @{
+                type     = "function"
+                function = @{
+                    name        = $script.BaseName
+                    description = $description
+                    parameters  = $params
                 }
             }
-            
-            if ($required.Count -gt 0) {
-                $schema.input_schema.required = [array]$required
-            }
-            
-            # Return the schema to the foreach pipeline
-            $schema
         } catch {
-            Write-MatrixLog -Level "ERROR" -Message "Discovery Error ($($script.Name)): $_"
+            Write-MatrixLog -Level "ERROR" -Message "Tool discovery error ($($script.Name)): $_"
         }
     }
-    
-    # Return exactly one array of unique valid hashtables
-    if ($null -eq $discovered) { 
-        Write-MatrixLog -Message "No tools discovered."
-        return @() 
+
+    $valid = @($discovered) | Where-Object {
+        $_ -is [hashtable] -and $_.function -and $_.function.name
     }
-    $validTools = @($discovered) | Where-Object { $null -ne $_ -and $_ -is [hashtable] -and [string]::IsNullOrWhiteSpace($_.name) -eq $false }
-    
-    $uniqueTools = @()
-    $seenNames = @{}
-    foreach ($t in $validTools) {
-        if (-not $seenNames.ContainsKey($t.name)) {
-            $uniqueTools += $t
-            $seenNames[$t.name] = $true
+
+    # Deduplicate
+    $seen   = @{}
+    $unique = @()
+    foreach ($t in $valid) {
+        if (-not $seen[$t.function.name]) {
+            $unique += $t
+            $seen[$t.function.name] = $true
         }
     }
-    
-    Write-MatrixLog -Message "Total unique tools discovered: $($uniqueTools.Count)"
-    return [array]$uniqueTools
+
+    Write-MatrixLog -Message "Tools ready: $($unique.Count) ($($unique | ForEach-Object { $_.function.name }) -join ', ')"
+    return [array]$unique
 }
 
 function Invoke-MatrixTool {
@@ -102,29 +101,26 @@ function Invoke-MatrixTool {
         [string]$ToolName,
         [hashtable]$InputArgs
     )
-    
-    $pluginPath = Join-Path $global:MatrixRoot "plugins\$ToolName.ps1"
-    if (Test-Path $pluginPath) {
-        try {
-            if ($InputArgs -and $InputArgs.Keys.Count -gt 0) {
-                $jobOutput = & $pluginPath @InputArgs
-            } else {
-                $jobOutput = & $pluginPath
-            }
-            
-            if ($jobOutput -is [hashtable] -or $jobOutput -is [PSCustomObject] -or $jobOutput -is [array]) {
-                $strOut = $jobOutput | ConvertTo-Json -Depth 5 -Compress
-                Write-MatrixLog -Message "Tool Output ($ToolName): $strOut"
-                return $strOut
-            } else {
-                return [string]$jobOutput
-            }
-        } catch {
-            Write-MatrixLog -Level "ERROR" -Message "Tool Error ($ToolName): $_"
-            return "Error executing tool: $_"
-        }
+
+    $toolPath = Join-Path $global:MatrixRoot "tools\$ToolName.ps1"
+    if (-not (Test-Path $toolPath)) {
+        Write-MatrixLog -Level "WARN" -Message "Tool not found: $toolPath"
+        return "Error: tool '$ToolName' not found."
     }
-    
-    Write-MatrixLog -Level "WARN" -Message "Tool Not Found: $ToolName"
-    return "Tool $ToolName not found."
+
+    try {
+        $output = if ($InputArgs -and $InputArgs.Count -gt 0) {
+            & $toolPath @InputArgs
+        } else {
+            & $toolPath
+        }
+
+        if ($output -is [hashtable] -or $output -is [System.Management.Automation.PSCustomObject] -or $output -is [array]) {
+            return $output | ConvertTo-Json -Depth 5 -Compress
+        }
+        return [string]$output
+    } catch {
+        Write-MatrixLog -Level "ERROR" -Message "Tool error ($ToolName): $_"
+        return "Error executing '$ToolName': $_"
+    }
 }
