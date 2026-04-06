@@ -1,46 +1,96 @@
-# Matrix
+# matrix.ps1
 
-An AI agent that runs on **Mac**, **Linux**, and **Windows**. One command installs the right version for your platform.
+An AI agent for Windows built in PowerShell 5.1. Runs entirely locally using **Ollama + gemma4**. Features a CLI mode and a plugin system that lets the AI call PowerShell scripts as tools.
 
-## Install
+> Part of the [Matrix](https://github.com/laynr/matrix) family — also available for [Mac/Linux (Python)](https://github.com/laynr/matrix.py).
 
-### Mac / Linux
-```sh
-curl -fsSL https://raw.githubusercontent.com/laynr/matrix/main/install.sh | sh
-```
+## Install — one command
 
-### Windows (PowerShell)
+Run this in **PowerShell** (no Administrator required):
+
 ```powershell
-irm https://raw.githubusercontent.com/laynr/matrix/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/laynr/matrix.ps1/main/install.ps1 | iex
 ```
 
-After install, just run:
-```
+The installer will:
+- Set the execution policy to `RemoteSigned` for the current user (if needed)
+- Install **Git** via `winget` if missing
+- Install **Ollama** via `winget` (or direct download if winget unavailable)
+- Pull **gemma4:latest**
+- Clone this repo to `~\.matrix`
+- Register a `matrix` command in `~/bin` and add it to your `PATH`
+- Launch Matrix in CLI mode immediately
+
+After the first install, just run:
+
+```powershell
 matrix
 ```
 
-## Platform ports
+## Adding tools
 
-| Platform | Repo | Runtime | Backend |
-|----------|------|---------|---------|
-| Mac / Linux | [matrix.py](https://github.com/laynr/matrix.py) | Python 3 | Ollama + gemma4 |
-| Windows | [matrix.ps1](https://github.com/laynr/matrix.ps1) | PowerShell 5.1 | Anthropic Claude |
+Drop a `.ps1` file into the `tools/` directory. Matrix discovers it automatically via PowerShell's AST parser — your parameter names and `.SYNOPSIS` block become the tool schema.
 
-The meta-installer in this repo detects your OS and delegates to the appropriate port. Each port is maintained in its own repo.
-
-## What it does
-
-Matrix is a local AI agent with a dynamic tool system:
-
-- **Mac/Linux** — talks to a local Ollama instance running gemma4. Tools are Python files dropped into a `tools/` directory.
-- **Windows** — talks to the Anthropic Claude API. Tools are PowerShell scripts dropped into a `plugins/` directory.
-
-Both versions reload tools at runtime — no restart needed.
-
-## Architecture
-
+```powershell
+<#
+.SYNOPSIS
+Returns the current disk usage for a given drive.
+.PARAMETER Drive
+The drive letter to check (e.g. C:).
+#>
+param(
+    [string]$Drive = "C:"
+)
+Get-PSDrive $Drive | Select-Object Used, Free
 ```
-laynr/matrix          ← you are here (meta-installer, cross-platform entry point)
-├── laynr/matrix.py   ← Mac / Linux (Python + Ollama)
-└── laynr/matrix.ps1  ← Windows (PowerShell + Claude)
+
+No registration needed. Type `reload` in the REPL and the tool is live.
+
+## Built-in tools
+
+| Tool | What it does |
+|------|-------------|
+| `Get-Time` | Current date, time, and timezone |
+| `Get-SystemInfo` | OS version, CPU load, memory |
+| `Get-Weather` | Current weather for a location |
+| `Get-WikipediaSummary` | Wikipedia article summary |
+| `Invoke-Math` | Evaluate a math expression |
+
+## REPL commands
+
+| Command | Action |
+|---------|--------|
+| `reload` | Rescan `tools/` and register new tools |
+| `exit` / `quit` | Exit |
+
+## Configuration
+
+Override via environment variables before running:
+
+```powershell
+$env:MATRIX_MODEL = "gemma4:27b"
+matrix
 ```
+
+Or edit `~\.matrix\config.json`:
+
+```json
+{
+  "Provider":     "Ollama",
+  "Model":        "gemma4:latest",
+  "Endpoint":     "http://localhost:11434/api/chat",
+  "SystemPrompt": "You are Matrix..."
+}
+```
+
+## Manual install
+
+```powershell
+git clone https://github.com/laynr/matrix.ps1 ~/.matrix
+cd ~/.matrix
+.\Matrix.ps1 -CLI
+```
+
+## License
+
+MIT

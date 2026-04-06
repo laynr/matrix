@@ -3,74 +3,91 @@ if ($null -eq $LibRoot) { $LibRoot = "." }
 . (Join-Path $LibRoot "Logger.ps1")
 
 function Show-MatrixCLI {
-    Write-Host "=========================================" -ForegroundColor Cyan
-    Write-Host "          Matrix AI Agent CLI" -ForegroundColor Cyan
-    Write-Host "=========================================" -ForegroundColor Cyan
-
-    if (-not $global:Config.ApiKey) {
-        Write-Host "Warning: API Key is not set in config.json!" -ForegroundColor Yellow
-    }
+    Write-Host ""
+    Write-Host "  +----------------------------------+" -ForegroundColor Cyan
+    Write-Host "  |          M A T R I X             |" -ForegroundColor Cyan
+    Write-Host "  |     AI Agent  *  Ollama           |" -ForegroundColor Cyan
+    Write-Host "  +----------------------------------+" -ForegroundColor Cyan
+    Write-Host "  Model    : $($global:Config.Model)"
+    Write-Host "  Endpoint : $($global:Config.Endpoint)"
+    $tools = Get-MatrixTools
+    Write-Host "  Tools    : $($tools.Count) loaded ($( ($tools | ForEach-Object { $_.function.name }) -join ', '))"
+    Write-Host ""
+    Write-Host "  Type 'reload' to rescan tools.  Type 'exit' to quit."
+    Write-Host ("─" * 42)
 
     while ($true) {
         Write-Host ""
         $inputMsg = Read-Host "You"
         if ([string]::IsNullOrWhiteSpace($inputMsg)) { continue }
-        if ($inputMsg -eq "exit" -or $inputMsg -eq "quit") { break }
+
+        switch ($inputMsg.Trim().ToLower()) {
+            "exit"   { return }
+            "quit"   { return }
+            "reload" {
+                $tools = Get-MatrixTools
+                Write-Host "  Tools reloaded: $($tools.Count) ($( ($tools | ForEach-Object { $_.function.name }) -join ', '))" -ForegroundColor Cyan
+                continue
+            }
+        }
 
         Add-Message -Role "user" -Content $inputMsg
         $tools = Get-MatrixTools
-        
-        Write-Host "Matrix is thinking..." -ForegroundColor DarkGray
-        
+
+        Write-Host "  thinking..." -ForegroundColor DarkGray
+
         try {
             $response = Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools $tools
-            
+
             if ($response.error) {
-                Write-Host "API Error: $($response.error)" -ForegroundColor Red
-            } else {
-                Write-MatrixLog -Message "Assistant Response: $($response.content)"
-                Add-Message -Role "assistant" -Content $response.content
-                Process-AssistantMessageCLI -assistantMsg $response
-                Prune-Context
+                Write-Host "  [error] $($response.error)" -ForegroundColor Red
+                continue
             }
+
+            $msg = $response.message
+            Process-OllamaMessage -Msg $msg -Tools $tools
+            Prune-Context
+
         } catch {
-            Write-Host "Exception: $_" -ForegroundColor Red
+            Write-Host "  [exception] $_" -ForegroundColor Red
         }
     }
 }
 
-function Process-AssistantMessageCLI {
-    param($assistantMsg)
-    
-    $result = Invoke-MatrixToolchain -MessageContent $assistantMsg.content
-    
+# Handles one assistant message: prints text, executes tool calls, recurses for the follow-up.
+function Process-OllamaMessage {
+    param(
+        [object]$Msg,
+        [array]$Tools
+    )
+
+    $result = Invoke-MatrixToolchain -Message $Msg
+
+    # Print text response (may be empty if the model only called tools)
     if (-not [string]::IsNullOrWhiteSpace($result.TextOutput)) {
-        Write-Host $result.TextOutput
+        Write-Host ""
+        Write-Host "Matrix: $($result.TextOutput)"
     }
-    
+
     if ($result.HasTools) {
-        foreach ($tc in $result.ToolsCalled) {
-            Write-Host "[Executing tool $($tc.name)...]" -ForegroundColor DarkCyan
+        # Add the assistant's tool-call message to history
+        Add-Message -Role "assistant" -Content $result.TextOutput
+
+        # Add each tool result as a separate "tool" message
+        foreach ($tr in $result.ToolResults) {
+            Add-Message -Role $tr.role -Content $tr.content
         }
-        
-        Add-Message -Role "user" -Content $result.ToolResults
-        Write-MatrixLog -Message "Sending tool results: $($result.ToolResults | ConvertTo-Json -Compress)"
-        Write-Host "[Sending tool results back...]" -ForegroundColor DarkGray
-        
-        $tools = Get-MatrixTools
-        
-        try {
-            $response = Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools $tools
-            
-            if ($response.error) {
-                Write-Host "API Error: $($response.error)" -ForegroundColor Red
-            } elseif ($response.content) {
-                Add-Message -Role "assistant" -Content $response.content
-                Process-AssistantMessageCLI -assistantMsg $response
-                Prune-Context
-            }
-        } catch {
-            Write-Host "Exception: $_" -ForegroundColor Red
+
+        Write-Host "  [sending tool results...]" -ForegroundColor DarkGray
+
+        $followUp = Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools $Tools
+        if ($followUp.error) {
+            Write-Host "  [error] $($followUp.error)" -ForegroundColor Red
+        } elseif ($followUp.message) {
+            Process-OllamaMessage -Msg $followUp.message -Tools $Tools
         }
+    } else {
+        # Plain text reply — add to history
+        Add-Message -Role "assistant" -Content $result.TextOutput
     }
 }
