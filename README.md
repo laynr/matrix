@@ -1,19 +1,17 @@
-# matrix.ps1
+# Matrix
 
 An AI agent built in **PowerShell Core (pwsh 7+)**. Runs on **Mac, Linux, and Windows** using Ollama + gemma4. Tools are `.ps1` scripts dropped into the `tools/` directory.
-
-> Part of the [Matrix](https://github.com/laynr/matrix) family — also available as [matrix.py](https://github.com/laynr/matrix.py) (Python).
 
 ## Install — one command
 
 ### Mac / Linux
 ```sh
-curl -fsSL https://raw.githubusercontent.com/laynr/matrix.ps1/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/laynr/matrix/main/install.sh | sh
 ```
 
 ### Windows (PowerShell 5.1+)
 ```powershell
-irm https://raw.githubusercontent.com/laynr/matrix.ps1/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/laynr/matrix/main/install.ps1 | iex
 ```
 
 The installer:

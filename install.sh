@@ -6,13 +6,13 @@
 # to install.pwsh.ps1 which runs identically on all platforms.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/laynr/matrix.ps1/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/laynr/matrix/main/install.sh | sh
 
 set -e
 
 OS="$(uname -s)"
 ARCH="$(uname -m)"
-PWSH_INSTALLER_URL="https://raw.githubusercontent.com/laynr/matrix.ps1/main/install.pwsh.ps1"
+PWSH_INSTALLER_URL="https://raw.githubusercontent.com/laynr/matrix/main/install.pwsh.ps1"
 
 GREEN='\033[0;32m'; CYAN='\033[0;36m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 ok()   { printf "  ${GREEN}[ok]${NC}    %s\n" "$*"; }

@@ -4,7 +4,7 @@
 # install.pwsh.ps1 which handles Ollama, model, repo, and launch.
 #
 # Usage (run from Windows PowerShell 5.1):
-#   irm https://raw.githubusercontent.com/laynr/matrix.ps1/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/laynr/matrix/main/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
@@ -64,7 +64,7 @@ if ($pwshOk) {
 Write-Info "Running cross-platform PowerShell installer..."
 Write-Host ""
 
-$installerUrl = "https://raw.githubusercontent.com/laynr/matrix.ps1/main/install.pwsh.ps1"
+$installerUrl = "https://raw.githubusercontent.com/laynr/matrix/main/install.pwsh.ps1"
 $tmp = [IO.Path]::ChangeExtension([IO.Path]::GetTempFileName(), ".ps1")
 Invoke-WebRequest $installerUrl -OutFile $tmp
 & pwsh -NoProfile -ExecutionPolicy Bypass -File $tmp
