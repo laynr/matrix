@@ -66,9 +66,17 @@ function Get-MatrixTools {
                     $properties[$pName] = @{ type = $pType; description = $pDesc }
 
                     foreach ($attr in @($p.Attributes)) {
-                        if ($attr.TypeName.Name -match "Parameter" -and
-                            $attr.Extent.Text -match 'Mandatory\s*=?\s*\$?true') {
-                            $required += $pName
+                        # Must be an AttributeAst (not a type constraint like [string])
+                        if ($attr -isnot [System.Management.Automation.Language.AttributeAst]) { continue }
+                        if ($attr.TypeName.Name -ne 'Parameter') { continue }
+                        # Handle both [Parameter(Mandatory)] and [Parameter(Mandatory = $true)]
+                        $mandatoryArg = $attr.NamedArguments |
+                                        Where-Object { $_.ArgumentName -eq 'Mandatory' }
+                        if ($mandatoryArg) {
+                            if ($mandatoryArg.ExpressionOmitted -or
+                                $mandatoryArg.Argument.Extent.Text -match '^\$?true$') {
+                                $required += $pName
+                            }
                         }
                     }
                 }
@@ -109,7 +117,7 @@ function Get-MatrixTools {
     $script:ToolCacheMtime = @{}
     foreach ($s in $scripts) { $script:ToolCacheMtime[$s.BaseName] = $s.LastWriteTime }
 
-    Write-MatrixLog -Message "Tools ready: $($unique.Count) ($($unique | ForEach-Object { $_.function.name } | Sort-Object) -join ', ')"
+    Write-MatrixLog -Message "Tools ready: $($unique.Count) ($(($unique | ForEach-Object { $_.function.name } | Sort-Object) -join ', '))"
     return $script:ToolCache
 }
 

@@ -142,14 +142,16 @@ Or edit `~/.matrix/config.json`:
 }
 ```
 
-## Windows GUI
+## Windows
 
-On Windows, `matrix` starts the WPF GUI. Use `-CLI` for the terminal:
+On Windows, `matrix` starts the WPF GUI. `matrix -CLI` opens the terminal interface, which is **identical to Mac and Linux**:
+
 ```powershell
-matrix -CLI
+matrix          # GUI (Windows default)
+matrix -CLI     # Terminal REPL — same on all platforms
 ```
 
-On Mac and Linux, CLI mode is always used (no WPF).
+The spinner, tool calling, reload command, and all other behaviour are exactly the same in CLI mode regardless of OS.
 
 ## Manual run
 

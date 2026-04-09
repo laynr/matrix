@@ -1,33 +1,49 @@
-# Animated spinner while waiting for Ollama. Runs animation in a separate
-# PowerShell instance so the main thread can do the actual API call.
-function Invoke-WithSpinner {
-    param([scriptblock]$Action, [string]$Label = "thinking")
+# ── Spinner ───────────────────────────────────────────────────────────────────
+# Use Start-MatrixSpinner / Stop-MatrixSpinner so the actual API call stays in
+# the caller's scope (avoids PowerShell dynamic-scope issues with & $action).
+
+function Start-MatrixSpinner {
+    param([string]$Label = "thinking")
+
+    # Braille frames on UTF-8 terminals; ASCII fallback for old Windows consoles
+    $frames = if ($IsWindows -and [Console]::OutputEncoding.CodePage -ne 65001) {
+        @('|', '/', '-', '\')
+    } else {
+        @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
+    }
 
     $done = [System.Threading.ManualResetEventSlim]::new($false)
     $ps   = [PowerShell]::Create()
     [void]$ps.AddScript({
-        param($evt, $lbl)
-        $frames = '⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'
+        param($evt, $lbl, $fr)
         $i = 0
         while (-not $evt.IsSet) {
-            [Console]::Write("`r  $($frames[$i % 10]) $lbl...")
+            [Console]::Write("`r  $($fr[$i % $fr.Count]) $lbl...")
             [System.Threading.Thread]::Sleep(80)
             $i++
         }
+        # Clear spinner line completely
         [Console]::Write("`r" + (' ' * ($lbl.Length + 16)) + "`r")
-    }).AddArgument($done).AddArgument($Label) | Out-Null
+    }).AddArgument($done).AddArgument($Label).AddArgument($frames) | Out-Null
 
-    $handle = $ps.BeginInvoke()
-    try   { return & $Action }
-    finally {
-        $done.Set()
-        [void]$ps.EndInvoke($handle)
-        $ps.Dispose()
+    return [PSCustomObject]@{
+        Done   = $done
+        PS     = $ps
+        Handle = $ps.BeginInvoke()
     }
 }
 
+function Stop-MatrixSpinner {
+    param($Spinner)
+    if (-not $Spinner) { return }
+    $Spinner.Done.Set()
+    [void]$Spinner.PS.EndInvoke($Spinner.Handle)
+    $Spinner.PS.Dispose()
+}
+
+# ── CLI entry point ───────────────────────────────────────────────────────────
 function Show-MatrixCLI {
-    # Read version from .version file if present
+    # Version from .version file
     $versionFile = Join-Path $global:MatrixRoot ".version"
     $versionStr  = ""
     if (Test-Path $versionFile) {
@@ -62,7 +78,8 @@ function Show-MatrixCLI {
             "exit"   { return }
             "quit"   { return }
             "reload" {
-                # Force cache invalidation by clearing mtime table
+                # Force full cache rebuild
+                $script:ToolCache      = $null
                 $script:ToolCacheMtime = @{}
                 $tools = Get-MatrixTools
                 Write-Host "  Tools reloaded: $($tools.Count) ($( ($tools | ForEach-Object { $_.function.name }) -join ', '))" -ForegroundColor Cyan
@@ -73,17 +90,17 @@ function Show-MatrixCLI {
         Add-Message -Role "user" -Content $inputMsg
 
         try {
-            $response = Invoke-WithSpinner -Action {
-                Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools $tools
-            }
+            # Spinner runs in background thread; API call runs inline (correct scope)
+            $sp       = Start-MatrixSpinner
+            $response = Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools $tools
+            Stop-MatrixSpinner $sp
 
             if ($response.error) {
                 Write-Host "  [error] $($response.error)" -ForegroundColor Red
                 continue
             }
 
-            $msg = $response.message
-            Process-OllamaMessage -Msg $msg -Tools $tools
+            Process-OllamaMessage -Msg $response.message -Tools $tools
             Prune-Context
 
         } catch {
@@ -92,7 +109,7 @@ function Show-MatrixCLI {
     }
 }
 
-# Handles one assistant message: prints text, executes tool calls, recurses for the follow-up.
+# Handles one assistant message: prints text, executes tool calls, recurses for follow-up.
 function Process-OllamaMessage {
     param(
         [object]$Msg,
@@ -107,24 +124,20 @@ function Process-OllamaMessage {
 
     $result = Invoke-MatrixToolchain -Message $Msg
 
-    # Print text response (may be empty if the model only called tools)
     if (-not [string]::IsNullOrWhiteSpace($result.TextOutput)) {
         Write-Host ""
         Write-Host "Matrix: $($result.TextOutput)"
     }
 
     if ($result.HasTools) {
-        # Add the assistant's tool-call message to history
         Add-Message -Role "assistant" -Content $result.TextOutput
-
-        # Add each tool result as a separate "tool" message
         foreach ($tr in $result.ToolResults) {
             Add-Message -Role $tr.role -Content $tr.content
         }
 
-        $followUp = Invoke-WithSpinner -Label "processing" -Action {
-            Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools $Tools
-        }
+        $sp      = Start-MatrixSpinner "processing"
+        $followUp = Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools $Tools
+        Stop-MatrixSpinner $sp
 
         if ($followUp.error) {
             Write-Host "  [error] $($followUp.error)" -ForegroundColor Red
@@ -132,7 +145,6 @@ function Process-OllamaMessage {
             Process-OllamaMessage -Msg $followUp.message -Tools $Tools -Depth ($Depth + 1)
         }
     } else {
-        # Plain text reply — add to history
         Add-Message -Role "assistant" -Content $result.TextOutput
     }
 }
