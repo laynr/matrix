@@ -26,6 +26,66 @@ Write-MatrixLog -Message "Matrix starting (pwsh $($PSVersionTable.PSVersion))"
 $global:Config = Load-Config
 Clear-Messages
 
+# ── Auto-update: silently pull latest release on launch ───────────────────────
+function Invoke-MatrixUpdate {
+    $versionFile = Join-Path $global:MatrixRoot ".version"
+    $releaseApi  = "https://api.github.com/repos/laynr/matrix/releases/latest"
+    $releaseZip  = "https://github.com/laynr/matrix/releases/latest/download/matrix-release.zip"
+
+    $local = $null
+    if (Test-Path $versionFile) {
+        try { $local = Get-Content $versionFile -Raw | ConvertFrom-Json } catch {}
+    }
+
+    # Check at most once per hour — avoid hammering the API on every launch
+    if ($local -and $local.CheckedAt) {
+        try {
+            if (((Get-Date) - [datetime]$local.CheckedAt).TotalHours -lt 1) { return }
+        } catch {}
+    }
+
+    try {
+        $release    = Invoke-RestMethod $releaseApi -TimeoutSec 5 -ErrorAction Stop
+        $remoteDate = [datetime]$release.published_at
+        $localDate  = if ($local -and $local.PublishedAt) { [datetime]$local.PublishedAt } else { [datetime]::MinValue }
+
+        # Always update the checked-at timestamp
+        @{ PublishedAt = $release.published_at; CheckedAt = (Get-Date -Format "o") } |
+            ConvertTo-Json | Set-Content $versionFile -Encoding UTF8
+
+        if ($remoteDate -le $localDate) { return }   # already current
+
+        Write-Host "  [update] New version available — updating..." -ForegroundColor Cyan
+
+        $tmpZip     = [IO.Path]::ChangeExtension([IO.Path]::GetTempFileName(), ".zip")
+        $tmpExtract = Join-Path ([IO.Path]::GetTempPath()) "matrix-update-$PID"
+
+        Invoke-WebRequest $releaseZip -OutFile $tmpZip -TimeoutSec 60 -ErrorAction Stop
+        Expand-Archive $tmpZip -DestinationPath $tmpExtract -Force
+
+        # Remove tools that no longer exist in the new release
+        $newToolNames = @(Get-ChildItem (Join-Path $tmpExtract "tools") -Filter "*.ps1").BaseName
+        Get-ChildItem (Join-Path $global:MatrixRoot "tools") -Filter "*.ps1" |
+            Where-Object { $_.BaseName -notin $newToolNames } |
+            ForEach-Object { Remove-Item $_.FullName -Force }
+
+        # Sync Matrix.ps1, lib/, tools/
+        Copy-Item (Join-Path $tmpExtract "Matrix.ps1") $global:MatrixRoot -Force
+        Copy-Item (Join-Path $tmpExtract "lib")        $global:MatrixRoot -Recurse -Force
+        Copy-Item (Join-Path $tmpExtract "tools")      $global:MatrixRoot -Recurse -Force
+
+        Remove-Item $tmpZip, $tmpExtract -Recurse -Force -ErrorAction SilentlyContinue
+
+        Write-Host "  [update] Done. Run 'reload' for new tools; core changes apply next launch." -ForegroundColor Green
+        Write-Host ""
+
+    } catch {
+        # Silent fail — an update error must never prevent Matrix from starting
+    }
+}
+
+Invoke-MatrixUpdate
+
 if ($CLI) {
     . (Join-Path $global:MatrixRoot "lib" "CLI.ps1")
     Show-MatrixCLI

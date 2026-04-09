@@ -42,22 +42,57 @@ install.ps1     ← Windows:   PS5 bootstrap → installs pwsh 7
 
 ## Adding tools
 
-Drop a `.ps1` file into `tools/`. Matrix discovers it automatically — `.SYNOPSIS` becomes the description, `param()` block becomes the schema.
+Drop a `.ps1` file into `tools/`. Matrix discovers it automatically on the next message (schemas are cached; run `reload` to pick up new files immediately).
+
+### Tool template
+
+Copy this into a new file like `tools/My-Tool.ps1`:
 
 ```powershell
 <#
 .SYNOPSIS
-Returns the disk usage for a drive or path.
-.PARAMETER Path
-The path to check. Defaults to current drive root.
+One sentence: what does this tool do?
+
+.PARAMETER InputText
+The text to process.
+
+.PARAMETER MaxResults
+How many results to return. Default: 10.
 #>
-param([string]$Path = "/")
-$info = Get-PSDrive (Split-Path $Path -Qualifier).TrimEnd(':') -ErrorAction SilentlyContinue
-if ($info) { @{ Used = $info.Used; Free = $info.Free } | ConvertTo-Json -Compress }
-else { Get-Item $Path | Select-Object FullName, @{n='SizeBytes';e={(Get-ChildItem $_ -Recurse -File -EA SilentlyContinue | Measure-Object Length -Sum).Sum}} | ConvertTo-Json }
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)]
+    [string]$InputText,
+
+    [int]$MaxResults = 10
+)
+
+try {
+    # Your logic here. Use $IsWindows / $IsMacOS / $IsLinux for platform branches.
+
+    return @{
+        Result = "value"
+        Count  = 0
+    } | ConvertTo-Json -Depth 3 -Compress
+
+} catch {
+    return @{ error = $_.Exception.Message } | ConvertTo-Json -Compress
+}
 ```
 
-Type `reload` in the REPL — it's live immediately, no restart.
+### Rules for tool authors
+
+| Rule | Why |
+|------|-----|
+| Always `[CmdletBinding()]` | Required for Mandatory param detection |
+| Always `try/catch` returning `{ error: "..." }` | Agent handles errors gracefully |
+| Always return JSON — never `Write-Host` | Output goes to the model, not the screen |
+| Use `-Depth 3 -Compress` on output | Consistent, compact |
+| Add `-TimeoutSec 15` to any `Invoke-RestMethod` | Don't let the agent hang |
+| Use `$IsWindows / $IsMacOS / $IsLinux` | Cross-platform required |
+| Keep `.SYNOPSIS` to one sentence | Becomes the tool description the model sees |
+
+Type `reload` in the REPL — the tool is live immediately, no restart.
 
 ## Built-in tools
 

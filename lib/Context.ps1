@@ -3,7 +3,7 @@ $global:MatrixMessages = @()
 function Get-TokenCount {
     param([string]$Text)
     if ([string]::IsNullOrEmpty($Text)) { return 0 }
-    return [math]::Ceiling($Text.Length / 4)
+    return [math]::Ceiling($Text.Length / 3.5)
 }
 
 function Add-Message {

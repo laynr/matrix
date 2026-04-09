@@ -1,5 +1,17 @@
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+# Coerces a JSON-parsed value to the correct PowerShell type so tools receive
+# booleans, ints, and doubles rather than everything as a string.
+function Invoke-CoerceArg {
+    param($Value)
+    switch ($Value) {
+        { $_ -is [bool]   } { return [bool]$_;   break }
+        { $_ -is [long]   } { return [int]$_;    break }
+        { $_ -is [double] } { return [double]$_; break }
+        default             { return [string]$_ }
+    }
+}
+
 # Calls the Ollama chat API and returns the raw response object.
 # Response shape: { model, message: { role, content, tool_calls }, done }
 function Invoke-MatrixChat {
@@ -27,7 +39,8 @@ function Invoke-MatrixChat {
             -Uri         $Config.Endpoint `
             -Method      Post `
             -ContentType "application/json" `
-            -Body        $bodyJson
+            -Body        $bodyJson `
+            -TimeoutSec  120
         Write-MatrixLog -Message "RESPONSE: $($response | ConvertTo-Json -Depth 6 -Compress)"
         return $response
     } catch {
@@ -70,10 +83,10 @@ function Invoke-MatrixToolchain {
         if ($rawArgs -is [string] -and $rawArgs.Trim() -ne "") {
             try {
                 $parsed = $rawArgs | ConvertFrom-Json
-                $parsed.PSObject.Properties | ForEach-Object { $argsHash[$_.Name] = [string]$_.Value }
+                $parsed.PSObject.Properties | ForEach-Object { $argsHash[$_.Name] = Invoke-CoerceArg $_.Value }
             } catch {}
         } elseif ($rawArgs -and $rawArgs.PSObject) {
-            $rawArgs.PSObject.Properties | ForEach-Object { $argsHash[$_.Name] = [string]$_.Value }
+            $rawArgs.PSObject.Properties | ForEach-Object { $argsHash[$_.Name] = Invoke-CoerceArg $_.Value }
         }
 
         Write-MatrixLog -Message "Invoking tool: $name  args: $($argsHash | ConvertTo-Json -Compress)"

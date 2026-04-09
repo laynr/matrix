@@ -1,10 +1,14 @@
 # Discovers tools from the tools/ directory and builds Ollama-compatible schemas.
 # Each tool is a .ps1 file. The function name = file basename.
 # Parameters and .SYNOPSIS are parsed via PowerShell AST.
+# Schemas are cached in memory and only rebuilt when a tool file changes.
+
+$script:ToolCache      = $null
+$script:ToolCacheMtime = @{}   # BaseName → LastWriteTime
 
 function Get-MatrixTools {
-    $root      = if ($global:MatrixRoot) { $global:MatrixRoot } else { Split-Path -Parent $PSScriptRoot }
-    $toolsDir  = Join-Path $root "tools"  # forward-slash safe; pwsh handles both separators
+    $root     = if ($global:MatrixRoot) { $global:MatrixRoot } else { Split-Path -Parent $PSScriptRoot }
+    $toolsDir = Join-Path $root "tools"
 
     Write-MatrixLog -Message "Scanning tools in: $toolsDir"
 
@@ -13,8 +17,18 @@ function Get-MatrixTools {
         return @()
     }
 
-    $scripts = Get-ChildItem -Path $toolsDir -Filter "*.ps1"
-    Write-MatrixLog -Message "Found $($scripts.Count) tool script(s)"
+    $scripts = @(Get-ChildItem -Path $toolsDir -Filter "*.ps1")
+
+    # Cache hit: same file count AND no file has a newer mtime
+    $dirty = ($scripts.Count -ne $script:ToolCacheMtime.Count) -or
+             ($scripts | Where-Object { $script:ToolCacheMtime[$_.BaseName] -ne $_.LastWriteTime })
+
+    if (-not $dirty -and $script:ToolCache) {
+        Write-MatrixLog -Message "Tool cache hit ($($script:ToolCache.Count) tools)"
+        return $script:ToolCache
+    }
+
+    Write-MatrixLog -Message "Rebuilding tool cache ($($scripts.Count) scripts)"
 
     $discovered = foreach ($script in $scripts) {
         try {
@@ -40,11 +54,10 @@ function Get-MatrixTools {
                     $pType = "string"
                     if ($p.StaticType) {
                         $t = $p.StaticType.Name.ToLower()
-                        if ($t -match "int|double|long|float") { $pType = "number" }
-                        elseif ($t -match "bool|switch")        { $pType = "boolean" }
+                        if ($t -match "int|long|float|double|decimal") { $pType = "number" }
+                        elseif ($t -match "bool|switch")                { $pType = "boolean" }
                     }
 
-                    # Grab per-parameter description from .PARAMETER help block
                     $pDesc = "Parameter $pName"
                     if ($help -and $help.Parameters -and $help.Parameters[$pName]) {
                         $pDesc = $help.Parameters[$pName].Trim()
@@ -54,14 +67,13 @@ function Get-MatrixTools {
 
                     foreach ($attr in @($p.Attributes)) {
                         if ($attr.TypeName.Name -match "Parameter" -and
-                            $attr.Extent.Text -match 'Mandatory\s*=\s*\$true') {
+                            $attr.Extent.Text -match 'Mandatory\s*=?\s*\$?true') {
                             $required += $pName
                         }
                     }
                 }
             }
 
-            # Ollama / OpenAI function-calling schema
             $params = @{ type = "object"; properties = $properties }
             if ($required.Count -gt 0) { $params.required = [array]$required }
 
@@ -92,8 +104,13 @@ function Get-MatrixTools {
         }
     }
 
-    Write-MatrixLog -Message "Tools ready: $($unique.Count) ($($unique | ForEach-Object { $_.function.name }) -join ', ')"
-    return [array]$unique
+    # Update cache
+    $script:ToolCache = [array]$unique
+    $script:ToolCacheMtime = @{}
+    foreach ($s in $scripts) { $script:ToolCacheMtime[$s.BaseName] = $s.LastWriteTime }
+
+    Write-MatrixLog -Message "Tools ready: $($unique.Count) ($($unique | ForEach-Object { $_.function.name } | Sort-Object) -join ', ')"
+    return $script:ToolCache
 }
 
 function Invoke-MatrixTool {
@@ -115,7 +132,9 @@ function Invoke-MatrixTool {
             & $toolPath
         }
 
-        if ($output -is [hashtable] -or $output -is [System.Management.Automation.PSCustomObject] -or $output -is [array]) {
+        if ($output -is [hashtable] -or
+            $output -is [System.Management.Automation.PSCustomObject] -or
+            $output -is [array]) {
             return $output | ConvertTo-Json -Depth 5 -Compress
         }
         return [string]$output
