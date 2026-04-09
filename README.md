@@ -61,13 +61,23 @@ Type `reload` in the REPL — it's live immediately, no restart.
 
 ## Built-in tools
 
-| Tool | Platforms | What it does |
-|------|-----------|-------------|
-| `Get-Time` | All | Current date, time, and timezone |
-| `Get-SystemInfo` | All | OS, CPU load, memory (cross-platform) |
-| `Get-Weather` | All | Current weather for a location |
-| `Get-WikipediaSummary` | All | Wikipedia article summary |
-| `Invoke-Math` | All | Evaluate a math expression |
+| Tool | What it does |
+|------|-------------|
+| `Get-Time` | Current date, time, and timezone |
+| `Get-SystemInfo` | OS, CPU load, memory (cross-platform) |
+| `Get-Weather` | Current weather for a location |
+| `Get-WikipediaSummary` | Wikipedia article summary |
+| `Invoke-Math` | Evaluate a math expression |
+| `Read-File` | Read a file's contents, with optional line range |
+| `Write-FileContent` | Write or append text to a file |
+| `Find-Files` | Search for files by name pattern or text content |
+| `Get-WebContent` | Fetch a URL and return readable text |
+| `Get-ProcessList` | List running processes, filtered by name |
+| `Invoke-ShellCommand` | Run a shell command and return its output |
+| `Get-EnvVariable` | Read one or all environment variables |
+| `Convert-Units` | Convert between temperature, length, weight, data size, speed |
+| `Get-IPInfo` | Public IP address and geolocation |
+| `Convert-DataFormat` | Convert between JSON, CSV, list, and table |
 
 ## REPL commands
 
