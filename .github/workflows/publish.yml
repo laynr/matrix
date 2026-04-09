@@ -1,13 +1,30 @@
-name: Publish Release
+name: Test and Publish
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   workflow_dispatch:
 
 jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tests (schema + unit, no network)
+        shell: pwsh
+        run: pwsh tests/Run-Tests.ps1 -SchemaOnly
+
   release:
+    name: Publish Release
+    needs: test
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
 
@@ -19,7 +36,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PUBLIC_REPO_PAT }}
         run: |
-          # Delete the existing 'latest' release and tag so we can replace it
           gh release delete latest --repo laynr/matrix --yes 2>/dev/null || true
           git -C . tag -d latest 2>/dev/null || true
           gh api -X DELETE repos/laynr/matrix/git/refs/tags/latest 2>/dev/null || true
