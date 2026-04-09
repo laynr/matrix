@@ -1,0 +1,31 @@
+name: Publish Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package Matrix
+        run: |
+          zip -r matrix-release.zip Matrix.ps1 lib/ tools/
+
+      - name: Publish to laynr/matrix releases
+        env:
+          GH_TOKEN: ${{ secrets.PUBLIC_REPO_PAT }}
+        run: |
+          # Delete the existing 'latest' release and tag so we can replace it
+          gh release delete latest --repo laynr/matrix --yes 2>/dev/null || true
+          git -C . tag -d latest 2>/dev/null || true
+          gh api -X DELETE repos/laynr/matrix/git/refs/tags/latest 2>/dev/null || true
+
+          gh release create latest matrix-release.zip \
+            --repo laynr/matrix \
+            --title "Latest" \
+            --notes "Latest Matrix release. Install with the one-liner in the README." \
+            --latest
