@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/layne/projects/matrix/.claude/hooks/pre-commit-tests.sh",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/layne/projects/matrix/.claude/hooks/post-commit-memory.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

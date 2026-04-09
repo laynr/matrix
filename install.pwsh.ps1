@@ -9,7 +9,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$REPO_URL    = "https://github.com/laynr/matrix.ps1"
+$REPO_URL    = "https://github.com/laynr/matrix"
 $INSTALL_DIR = if ($env:MATRIX_HOME) { $env:MATRIX_HOME } else { Join-Path $HOME ".matrix" }
 $MODEL       = if ($env:MATRIX_MODEL) { $env:MATRIX_MODEL } else { "gemma4:latest" }
 

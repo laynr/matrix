@@ -1,6 +1,6 @@
 # ── Spinner ───────────────────────────────────────────────────────────────────
-# Use Start-MatrixSpinner / Stop-MatrixSpinner so the actual API call stays in
-# the caller's scope (avoids PowerShell dynamic-scope issues with & $action).
+# Utility spinner for long-running operations (not used in the streaming agent
+# loop — streaming output provides live feedback on its own).
 
 function Start-MatrixSpinner {
     param([string]$Label = "thinking")
@@ -22,7 +22,6 @@ function Start-MatrixSpinner {
             [System.Threading.Thread]::Sleep(80)
             $i++
         }
-        # Clear spinner line completely
         [Console]::Write("`r" + (' ' * ($lbl.Length + 16)) + "`r")
     }).AddArgument($done).AddArgument($Label).AddArgument($frames) | Out-Null
 
@@ -78,7 +77,6 @@ function Show-MatrixCLI {
             "exit"   { return }
             "quit"   { return }
             "reload" {
-                # Force full cache rebuild
                 $script:ToolCache      = $null
                 $script:ToolCacheMtime = @{}
                 $tools = Get-MatrixTools
@@ -90,29 +88,18 @@ function Show-MatrixCLI {
         Add-Message -Role "user" -Content $inputMsg
 
         try {
-            # Spinner runs in background thread; API call runs inline (correct scope)
-            $sp       = Start-MatrixSpinner
-            $response = Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools $tools
-            Stop-MatrixSpinner $sp
-
-            if ($response.error) {
-                Write-Host "  [error] $($response.error)" -ForegroundColor Red
-                continue
-            }
-
-            Process-OllamaMessage -Msg $response.message -Tools $tools
+            Process-OllamaMessage -Tools $tools
             Prune-Context
-
         } catch {
             Write-Host "  [exception] $_" -ForegroundColor Red
         }
     }
 }
 
-# Handles one assistant message: prints text, executes tool calls, recurses for follow-up.
+# Streams one assistant response, executes any tool calls, and recurses for
+# follow-up responses until the model stops calling tools.
 function Process-OllamaMessage {
     param(
-        [object]$Msg,
         [array]$Tools,
         [int]$Depth = 0
     )
@@ -122,29 +109,28 @@ function Process-OllamaMessage {
         return
     }
 
-    $result = Invoke-MatrixToolchain -Message $Msg
+    # Print prefix then stream — tokens appear live as the model generates them
+    Write-Host ""
+    Write-Host -NoNewline "  Matrix: " -ForegroundColor Cyan
+    $response = Invoke-MatrixStreamingChat -Config $global:Config -Messages (Get-Messages) -Tools $Tools
+    Write-Host ""  # newline after last token (or after blank tool-only response)
 
-    if (-not [string]::IsNullOrWhiteSpace($result.TextOutput)) {
-        Write-Host ""
-        Write-Host "Matrix: $($result.TextOutput)"
+    if ($response.error) {
+        Write-Host "  [error] $($response.error)" -ForegroundColor Red
+        return
     }
 
+    # Dispatch any tool calls (runs in parallel runspaces)
+    $result = Invoke-MatrixToolchain -Message $response.message
+
+    # Always record the assistant turn
+    Add-Message -Role "assistant" -Content $result.TextOutput
+
     if ($result.HasTools) {
-        Add-Message -Role "assistant" -Content $result.TextOutput
         foreach ($tr in $result.ToolResults) {
             Add-Message -Role $tr.role -Content $tr.content
         }
-
-        $sp      = Start-MatrixSpinner "processing"
-        $followUp = Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools $Tools
-        Stop-MatrixSpinner $sp
-
-        if ($followUp.error) {
-            Write-Host "  [error] $($followUp.error)" -ForegroundColor Red
-        } elseif ($followUp.message) {
-            Process-OllamaMessage -Msg $followUp.message -Tools $Tools -Depth ($Depth + 1)
-        }
-    } else {
-        Add-Message -Role "assistant" -Content $result.TextOutput
+        # Follow-up: model synthesizes tool results into a final answer
+        Process-OllamaMessage -Tools $Tools -Depth ($Depth + 1)
     }
 }
