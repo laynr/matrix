@@ -4,7 +4,7 @@
 
 function Get-MatrixTools {
     $root      = if ($global:MatrixRoot) { $global:MatrixRoot } else { Split-Path -Parent $PSScriptRoot }
-    $toolsDir  = Join-Path $root "tools"
+    $toolsDir  = Join-Path $root "tools"  # forward-slash safe; pwsh handles both separators
 
     Write-MatrixLog -Message "Scanning tools in: $toolsDir"
 
@@ -102,7 +102,7 @@ function Invoke-MatrixTool {
         [hashtable]$InputArgs
     )
 
-    $toolPath = Join-Path $global:MatrixRoot "tools\$ToolName.ps1"
+    $toolPath = Join-Path $global:MatrixRoot "tools" "$ToolName.ps1"
     if (-not (Test-Path $toolPath)) {
         Write-MatrixLog -Level "WARN" -Message "Tool not found: $toolPath"
         return "Error: tool '$ToolName' not found."

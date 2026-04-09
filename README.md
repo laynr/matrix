@@ -1,60 +1,73 @@
 # matrix.ps1
 
-An AI agent for Windows built in PowerShell 5.1. Runs entirely locally using **Ollama + gemma4**. Features a CLI mode and a plugin system that lets the AI call PowerShell scripts as tools.
+An AI agent built in **PowerShell Core (pwsh 7+)**. Runs on **Mac, Linux, and Windows** using Ollama + gemma4. Tools are `.ps1` scripts dropped into the `tools/` directory.
 
-> Part of the [Matrix](https://github.com/laynr/matrix) family — also available for [Mac/Linux (Python)](https://github.com/laynr/matrix.py).
+> Part of the [Matrix](https://github.com/laynr/matrix) family — also available as [matrix.py](https://github.com/laynr/matrix.py) (Python).
 
 ## Install — one command
 
-Run this in **PowerShell** (no Administrator required):
+### Mac / Linux
+```sh
+curl -fsSL https://raw.githubusercontent.com/laynr/matrix.ps1/main/install.sh | sh
+```
 
+### Windows (PowerShell 5.1+)
 ```powershell
 irm https://raw.githubusercontent.com/laynr/matrix.ps1/main/install.ps1 | iex
 ```
 
-The installer will:
-- Set the execution policy to `RemoteSigned` for the current user (if needed)
-- Install **Git** via `winget` if missing
-- Install **Ollama** via `winget` (or direct download if winget unavailable)
-- Pull **gemma4:latest**
-- Clone this repo to `~\.matrix`
-- Register a `matrix` command in `~/bin` and add it to your `PATH`
-- Launch Matrix in CLI mode immediately
+The installer:
+1. Installs **PowerShell 7** (`pwsh`) if missing — using native OS tools only (brew/pkg on Mac, snap/apt/dnf/tarball on Linux, winget/MSI on Windows)
+2. Installs **Ollama** if missing
+3. Pulls **gemma4:latest**
+4. Clones this repo to `~/.matrix`
+5. Installs a `matrix` command
+6. Starts Matrix immediately
 
-After the first install, just run:
-
-```powershell
+After install, just run:
+```
 matrix
+```
+
+## How it works
+
+The bootstrap (`install.sh` / `install.ps1`) is the only platform-specific part — it installs `pwsh` using whatever tools are natively available on the OS. Once `pwsh` is running, `install.pwsh.ps1` takes over and is **identical on all platforms**.
+
+```
+install.sh      ← Mac/Linux: sh bootstrap → installs pwsh
+install.ps1     ← Windows:   PS5 bootstrap → installs pwsh 7
+    └── install.pwsh.ps1   ← shared pwsh 7 setup (Ollama, model, repo, launcher)
+            └── Matrix.ps1 ← cross-platform agent (pwsh 7, all OS)
 ```
 
 ## Adding tools
 
-Drop a `.ps1` file into the `tools/` directory. Matrix discovers it automatically via PowerShell's AST parser — your parameter names and `.SYNOPSIS` block become the tool schema.
+Drop a `.ps1` file into `tools/`. Matrix discovers it automatically — `.SYNOPSIS` becomes the description, `param()` block becomes the schema.
 
 ```powershell
 <#
 .SYNOPSIS
-Returns the current disk usage for a given drive.
-.PARAMETER Drive
-The drive letter to check (e.g. C:).
+Returns the disk usage for a drive or path.
+.PARAMETER Path
+The path to check. Defaults to current drive root.
 #>
-param(
-    [string]$Drive = "C:"
-)
-Get-PSDrive $Drive | Select-Object Used, Free
+param([string]$Path = "/")
+$info = Get-PSDrive (Split-Path $Path -Qualifier).TrimEnd(':') -ErrorAction SilentlyContinue
+if ($info) { @{ Used = $info.Used; Free = $info.Free } | ConvertTo-Json -Compress }
+else { Get-Item $Path | Select-Object FullName, @{n='SizeBytes';e={(Get-ChildItem $_ -Recurse -File -EA SilentlyContinue | Measure-Object Length -Sum).Sum}} | ConvertTo-Json }
 ```
 
-No registration needed. Type `reload` in the REPL and the tool is live.
+Type `reload` in the REPL — it's live immediately, no restart.
 
 ## Built-in tools
 
-| Tool | What it does |
-|------|-------------|
-| `Get-Time` | Current date, time, and timezone |
-| `Get-SystemInfo` | OS version, CPU load, memory |
-| `Get-Weather` | Current weather for a location |
-| `Get-WikipediaSummary` | Wikipedia article summary |
-| `Invoke-Math` | Evaluate a math expression |
+| Tool | Platforms | What it does |
+|------|-----------|-------------|
+| `Get-Time` | All | Current date, time, and timezone |
+| `Get-SystemInfo` | All | OS, CPU load, memory (cross-platform) |
+| `Get-Weather` | All | Current weather for a location |
+| `Get-WikipediaSummary` | All | Wikipedia article summary |
+| `Invoke-Math` | All | Evaluate a math expression |
 
 ## REPL commands
 
@@ -65,15 +78,16 @@ No registration needed. Type `reload` in the REPL and the tool is live.
 
 ## Configuration
 
-Override via environment variables before running:
-
 ```powershell
+# Override model
 $env:MATRIX_MODEL = "gemma4:27b"
 matrix
+
+# Custom install location
+$env:MATRIX_HOME = "/opt/matrix"
 ```
 
-Or edit `~\.matrix\config.json`:
-
+Or edit `~/.matrix/config.json`:
 ```json
 {
   "Provider":     "Ollama",
@@ -83,12 +97,19 @@ Or edit `~\.matrix\config.json`:
 }
 ```
 
-## Manual install
+## Windows GUI
 
+On Windows, `matrix` starts the WPF GUI. Use `-CLI` for the terminal:
 ```powershell
-git clone https://github.com/laynr/matrix.ps1 ~/.matrix
-cd ~/.matrix
-.\Matrix.ps1 -CLI
+matrix -CLI
+```
+
+On Mac and Linux, CLI mode is always used (no WPF).
+
+## Manual run
+
+```sh
+pwsh -NoProfile -ExecutionPolicy Bypass -File ~/.matrix/Matrix.ps1 -CLI
 ```
 
 ## License
