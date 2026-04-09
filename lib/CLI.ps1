@@ -1,8 +1,44 @@
-$LibRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-if ($null -eq $LibRoot) { $LibRoot = "." }
-. (Join-Path $LibRoot "Logger.ps1")
+# Animated spinner while waiting for Ollama. Runs animation in a separate
+# PowerShell instance so the main thread can do the actual API call.
+function Invoke-WithSpinner {
+    param([scriptblock]$Action, [string]$Label = "thinking")
+
+    $done = [System.Threading.ManualResetEventSlim]::new($false)
+    $ps   = [PowerShell]::Create()
+    [void]$ps.AddScript({
+        param($evt, $lbl)
+        $frames = '⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'
+        $i = 0
+        while (-not $evt.IsSet) {
+            [Console]::Write("`r  $($frames[$i % 10]) $lbl...")
+            [System.Threading.Thread]::Sleep(80)
+            $i++
+        }
+        [Console]::Write("`r" + (' ' * ($lbl.Length + 16)) + "`r")
+    }).AddArgument($done).AddArgument($Label) | Out-Null
+
+    $handle = $ps.BeginInvoke()
+    try   { return & $Action }
+    finally {
+        $done.Set()
+        [void]$ps.EndInvoke($handle)
+        $ps.Dispose()
+    }
+}
 
 function Show-MatrixCLI {
+    # Read version from .version file if present
+    $versionFile = Join-Path $global:MatrixRoot ".version"
+    $versionStr  = ""
+    if (Test-Path $versionFile) {
+        try {
+            $v = Get-Content $versionFile -Raw | ConvertFrom-Json
+            if ($v.PublishedAt) {
+                $versionStr = "  Version  : $([datetime]$v.PublishedAt | Get-Date -Format 'yyyy-MM-dd')"
+            }
+        } catch {}
+    }
+
     Write-Host ""
     Write-Host "  +----------------------------------+" -ForegroundColor Cyan
     Write-Host "  |          M A T R I X             |" -ForegroundColor Cyan
@@ -10,8 +46,9 @@ function Show-MatrixCLI {
     Write-Host "  +----------------------------------+" -ForegroundColor Cyan
     Write-Host "  Model    : $($global:Config.Model)"
     Write-Host "  Endpoint : $($global:Config.Endpoint)"
+    if ($versionStr) { Write-Host $versionStr }
     $tools = Get-MatrixTools
-    Write-Host "  Tools    : $($tools.Count) loaded ($( ($tools | ForEach-Object { $_.function.name }) -join ', '))"
+    Write-Host "  Tools    : $($tools.Count) loaded"
     Write-Host ""
     Write-Host "  Type 'reload' to rescan tools.  Type 'exit' to quit."
     Write-Host ("─" * 42)
@@ -25,6 +62,8 @@ function Show-MatrixCLI {
             "exit"   { return }
             "quit"   { return }
             "reload" {
+                # Force cache invalidation by clearing mtime table
+                $script:ToolCacheMtime = @{}
                 $tools = Get-MatrixTools
                 Write-Host "  Tools reloaded: $($tools.Count) ($( ($tools | ForEach-Object { $_.function.name }) -join ', '))" -ForegroundColor Cyan
                 continue
@@ -32,12 +71,11 @@ function Show-MatrixCLI {
         }
 
         Add-Message -Role "user" -Content $inputMsg
-        $tools = Get-MatrixTools
-
-        Write-Host "  thinking..." -ForegroundColor DarkGray
 
         try {
-            $response = Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools $tools
+            $response = Invoke-WithSpinner -Action {
+                Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools $tools
+            }
 
             if ($response.error) {
                 Write-Host "  [error] $($response.error)" -ForegroundColor Red
@@ -58,8 +96,14 @@ function Show-MatrixCLI {
 function Process-OllamaMessage {
     param(
         [object]$Msg,
-        [array]$Tools
+        [array]$Tools,
+        [int]$Depth = 0
     )
+
+    if ($Depth -ge 10) {
+        Write-Host "  [warn] Max tool call depth reached — stopping." -ForegroundColor Yellow
+        return
+    }
 
     $result = Invoke-MatrixToolchain -Message $Msg
 
@@ -78,13 +122,14 @@ function Process-OllamaMessage {
             Add-Message -Role $tr.role -Content $tr.content
         }
 
-        Write-Host "  [sending tool results...]" -ForegroundColor DarkGray
+        $followUp = Invoke-WithSpinner -Label "processing" -Action {
+            Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools $Tools
+        }
 
-        $followUp = Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools $Tools
         if ($followUp.error) {
             Write-Host "  [error] $($followUp.error)" -ForegroundColor Red
         } elseif ($followUp.message) {
-            Process-OllamaMessage -Msg $followUp.message -Tools $Tools
+            Process-OllamaMessage -Msg $followUp.message -Tools $Tools -Depth ($Depth + 1)
         }
     } else {
         # Plain text reply — add to history
