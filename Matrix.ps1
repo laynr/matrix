@@ -19,7 +19,7 @@ $global:MatrixRoot = $PSScriptRoot
 . (Join-Path $global:MatrixRoot "lib" "ToolManager.ps1")
 . (Join-Path $global:MatrixRoot "lib" "Logger.ps1")
 
-$logPath = Join-Path $global:MatrixRoot "matrix.log"
+$logPath = Join-Path $global:MatrixRoot "err.log"
 if (Test-Path $logPath) { Remove-Item $logPath -Force }
 Write-MatrixLog -Message "Matrix starting (pwsh $($PSVersionTable.PSVersion))"
 
