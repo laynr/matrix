@@ -63,13 +63,16 @@ function Invoke-MatrixUpdate {
         Invoke-WebRequest $releaseZip -OutFile $tmpZip -TimeoutSec 60 -ErrorAction Stop
         Expand-Archive $tmpZip -DestinationPath $tmpExtract -Force
 
-        # Sync Matrix.ps1 and lib/ from release
+        # Remove tools that no longer exist in the new release (keeps tools dir clean)
+        $newToolNames = @(Get-ChildItem (Join-Path $tmpExtract "tools") -Filter "*.ps1").BaseName
+        Get-ChildItem (Join-Path $global:MatrixRoot "tools") -Filter "*.ps1" |
+            Where-Object { $_.BaseName -notin $newToolNames } |
+            ForEach-Object { Remove-Item $_.FullName -Force }
+
+        # Sync Matrix.ps1, lib/, tools/
         Copy-Item (Join-Path $tmpExtract "Matrix.ps1") $global:MatrixRoot -Force
         Copy-Item (Join-Path $tmpExtract "lib")        $global:MatrixRoot -Recurse -Force
-        # Copy release tools individually — never delete local tools (user may have custom ones)
-        Get-ChildItem (Join-Path $tmpExtract "tools") -Filter "*.ps1" | ForEach-Object {
-            Copy-Item $_.FullName (Join-Path $global:MatrixRoot "tools" $_.Name) -Force
-        }
+        Copy-Item (Join-Path $tmpExtract "tools")      $global:MatrixRoot -Recurse -Force
 
         Remove-Item $tmpZip, $tmpExtract -Recurse -Force -ErrorAction SilentlyContinue
 

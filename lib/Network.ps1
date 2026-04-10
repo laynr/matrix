@@ -198,8 +198,13 @@ function Invoke-MatrixStreamingChat {
                         [Console]::Out.Flush()
                         [void]$fullContent.Append($token)
                     }
-                    if ($chunk.message.tool_calls) {
+                    if ($chunk.message.tool_calls -and -not $toolCalls) {
+                        # First tool_calls seen in stream — announce immediately before dispatch
                         $toolCalls = $chunk.message.tool_calls
+                        Write-Host ""
+                        foreach ($tc in $toolCalls) {
+                            Write-Host "  ⟳ Calling $($tc.function.name)..." -ForegroundColor DarkCyan
+                        }
                     }
                 } catch {
                     Write-MatrixLog -Level "WARN" -Message "Malformed chunk skipped: $line"
