@@ -114,3 +114,18 @@ Summarize:
 
 **The new tool is auto-discovered on the next message — no restart needed.**
 Type `tools` in the REPL to confirm it appears in the list.
+
+**Selective loading:** Matrix only injects the most relevant tool schemas into
+each API request (scored by keyword match against the user's message). If this
+tool should always be available regardless of query topic, add it to `CoreTools`
+in `config.json`:
+
+```json
+{
+  "CoreTools": ["YourNewTool", "Get-Time"]
+}
+```
+
+Tools in `CoreTools` are always sent in full schema form. All other tools appear
+in the compact catalog in the system prompt so the model knows they exist, and
+are selected automatically when the user's message is relevant to them.
