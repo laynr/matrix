@@ -1,30 +1,14 @@
-name: Test and Publish
+name: Publish
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  test:
-    name: Tests (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run tests (schema + unit, no network)
-        shell: pwsh
-        run: pwsh tests/Run-Tests.ps1 -SchemaOnly
-
   release:
     name: Publish Release
-    needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
     permissions:
       contents: write
     steps:

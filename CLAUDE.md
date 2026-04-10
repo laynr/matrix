@@ -33,7 +33,7 @@ tests/
   Test-MultiTool.ps1    ← Integration: parallel dispatch, type coercion, cache
   Run-Tests.ps1         ← Master runner: -SchemaOnly (CI), -Suite Tools|MultiTool
 .github/workflows/
-  publish.yml           ← Test on 3 OS → zip release → publish to laynr/matrix releases
+  publish.yml           ← zip release → publish to laynr/matrix releases (push to main)
 ```
 
 **Key design decisions (do not revert without discussion):**
