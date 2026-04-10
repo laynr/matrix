@@ -5,11 +5,11 @@
 # It is called by install.sh (Mac/Linux) and install.ps1 (Windows) after
 # those platform-specific scripts have bootstrapped pwsh itself.
 #
-# Handles: Ollama install, model pull, repo clone, launcher, run.
+# Handles: Ollama install, model pull, download release zip, launcher, run.
 
 $ErrorActionPreference = "Stop"
 
-$REPO_URL    = "https://github.com/laynr/matrix"
+$RELEASE_ZIP = "https://github.com/laynr/matrix/releases/download/latest/matrix-release.zip"
 $INSTALL_DIR = if ($env:MATRIX_HOME) { $env:MATRIX_HOME } else { Join-Path $HOME ".matrix" }
 $MODEL       = if ($env:MATRIX_MODEL) { $env:MATRIX_MODEL } else { "gemma4:latest" }
 
@@ -116,19 +116,17 @@ if ($modelList -match [regex]::Escape($modelBase)) {
     Write-Ok "Model '$MODEL' ready"
 }
 
-# ── Step 4: Clone or update the repo ─────────────────────────────────────────
-if (-not (Get-Command git -EA SilentlyContinue)) {
-    Write-Fail "git is required. Install it and re-run."
-}
-
-if (Test-Path (Join-Path $INSTALL_DIR ".git")) {
-    Write-Info "Updating Matrix at $INSTALL_DIR..."
-    git -C $INSTALL_DIR pull --quiet
-    Write-Ok "Matrix updated"
-} else {
-    Write-Info "Cloning Matrix to $INSTALL_DIR..."
-    git clone --quiet $REPO_URL $INSTALL_DIR
-    Write-Ok "Matrix cloned to $INSTALL_DIR"
+# ── Step 4: Download and extract release ─────────────────────────────────────
+Write-Info "Downloading Matrix to $INSTALL_DIR..."
+$tmpZip = [IO.Path]::ChangeExtension([IO.Path]::GetTempFileName(), ".zip")
+try {
+    Invoke-WebRequest $RELEASE_ZIP -OutFile $tmpZip -UseBasicParsing
+    if (Test-Path $INSTALL_DIR) { Remove-Item $INSTALL_DIR -Recurse -Force }
+    New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
+    Expand-Archive $tmpZip -DestinationPath $INSTALL_DIR -Force
+    Write-Ok "Matrix installed to $INSTALL_DIR"
+} finally {
+    Remove-Item $tmpZip -Force -EA SilentlyContinue
 }
 
 # ── Step 5: Install 'matrix' command ─────────────────────────────────────────

@@ -18,7 +18,7 @@ The installer:
 1. Installs **PowerShell 7** (`pwsh`) if missing — using native OS tools only (brew/pkg on Mac, snap/apt/dnf/tarball on Linux, winget/MSI on Windows)
 2. Installs **Ollama** if missing
 3. Pulls **gemma4:latest**
-4. Clones this repo to `~/.matrix`
+4. Downloads and extracts the latest release to `~/.matrix`
 5. Installs a `matrix` command
 6. Starts Matrix immediately
 
@@ -34,7 +34,7 @@ The bootstrap (`install.sh` / `install.ps1`) is the only platform-specific part 
 ```
 install.sh      ← Mac/Linux: sh bootstrap → installs pwsh
 install.ps1     ← Windows:   PS5 bootstrap → installs pwsh 7
-    └── install.pwsh.ps1   ← shared pwsh 7 setup (Ollama, model, repo, launcher)
+    └── install.pwsh.ps1   ← shared pwsh 7 setup (Ollama, model, download release, launcher)
             └── Matrix.ps1 ← cross-platform agent (pwsh 7, all OS)
 ```
 
