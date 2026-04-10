@@ -1,15 +1,18 @@
 #!/usr/bin/env pwsh
-# Matrix Test Runner — runs all tests and reports coverage.
-# Exit code 0 = all pass; non-zero = failure count (usable in CI).
+# Matrix Test Runner
 #
 # Usage:
-#   pwsh tests/Run-Tests.ps1               # full suite
-#   pwsh tests/Run-Tests.ps1 -SchemaOnly   # schemas only, no network calls
-#   pwsh tests/Run-Tests.ps1 -Suite Tools  # single suite
+#   pwsh tests/Run-Tests.ps1                   # full suite (Install → Tools → MultiTool)
+#   pwsh tests/Run-Tests.ps1 -SchemaOnly       # schema + unit only, no network
+#   pwsh tests/Run-Tests.ps1 -Suite Install    # install/uninstall only
+#   pwsh tests/Run-Tests.ps1 -Suite Tools      # tool unit tests only
+#   pwsh tests/Run-Tests.ps1 -Suite MultiTool  # multi-tool integration only
+#
+# ORDER: Install always runs first. Tool/MultiTool tests validate the source tree.
 
 param(
-    [switch]$SchemaOnly,           # skip tests requiring network
-    [ValidateSet("All","Tools","MultiTool")]
+    [switch]$SchemaOnly,
+    [ValidateSet("All","Install","Tools","MultiTool")]
     [string]$Suite = "All"
 )
 
@@ -20,13 +23,14 @@ Write-Host ""
 Write-Host "  ╔══════════════════════════════════╗" -ForegroundColor Cyan
 Write-Host "  ║      M A T R I X   T E S T S     ║" -ForegroundColor Cyan
 Write-Host "  ╚══════════════════════════════════╝" -ForegroundColor Cyan
+$platform = if ($IsWindows) { "Windows" } elseif ($IsMacOS) { "macOS" } else { "Linux" }
 Write-Host "  Suite      : $Suite"
 Write-Host "  SchemaOnly : $SchemaOnly"
-Write-Host "  Platform   : $(if ($IsWindows) { 'Windows' } elseif ($IsMacOS) { 'macOS' } else { 'Linux' })"
+Write-Host "  Platform   : $platform"
 Write-Host "  pwsh       : $($PSVersionTable.PSVersion)"
 Write-Host ""
 
-$totalFailed = 0
+$totalFailed  = 0
 $suiteResults = @()
 
 function Run-Suite {
@@ -35,26 +39,27 @@ function Run-Suite {
     Write-Host ("─" * 50)
     Write-Host "  Running: $Name" -ForegroundColor White
 
-    $args = @()
-    if ($Params.SchemaOnly) { $args += "-SchemaOnly" }
+    $passArgs = @()
+    if ($Params.SchemaOnly) { $passArgs += "-SchemaOnly" }
 
     try {
-        pwsh -NoProfile -ExecutionPolicy Bypass -File $Script @args
+        pwsh -NoProfile -ExecutionPolicy Bypass -File $Script @passArgs
         $exitCode = $LASTEXITCODE
     } catch {
         Write-Host "  [ERROR] Suite '$Name' threw: $_" -ForegroundColor Red
         $exitCode = 1
     }
 
-    $script:suiteResults += [PSCustomObject]@{
-        Suite    = $Name
-        ExitCode = $exitCode
-    }
-    $script:totalFailed += $exitCode
+    $script:suiteResults += [PSCustomObject]@{ Suite = $Name; ExitCode = $exitCode }
+    $script:totalFailed  += $exitCode
 }
 
 $testsDir = $PSScriptRoot
 
+# Install always runs first — validates deploy layout before code tests
+if ($Suite -in @("All","Install")) {
+    Run-Suite "Install / Uninstall" (Join-Path $testsDir "Test-Install.ps1") @{ SchemaOnly = $SchemaOnly }
+}
 if ($Suite -in @("All","Tools")) {
     Run-Suite "Tool Unit Tests" (Join-Path $testsDir "Test-Tools.ps1") @{ SchemaOnly = $SchemaOnly }
 }

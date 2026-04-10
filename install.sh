@@ -30,10 +30,18 @@ echo ""
 
 # ── Install pwsh if missing ────────────────────────────────────────────────────
 install_pwsh_macos() {
+    # Try Homebrew first (cask may be under microsoft tap)
     if command -v brew >/dev/null 2>&1; then
-        info "Installing PowerShell via Homebrew..."
-        brew install --cask powershell
-    else
+        info "Trying PowerShell via Homebrew..."
+        if ! brew install --cask powershell 2>/dev/null; then
+            info "Standard cask unavailable — trying Microsoft tap..."
+            brew tap microsoft/homebrew-tap 2>/dev/null || true
+            brew install --cask powershell 2>/dev/null || true
+        fi
+    fi
+
+    # Fall through to .pkg if Homebrew didn't get us there
+    if ! command -v pwsh >/dev/null 2>&1; then
         case "$ARCH" in
             arm64)  PKG_ARCH="osx-arm64" ;;
             x86_64) PKG_ARCH="osx-x64" ;;
@@ -44,20 +52,15 @@ install_pwsh_macos() {
         [ -z "$PWSH_VER" ] && die "Could not resolve latest PowerShell version"
         TMP_PKG="$(mktemp /tmp/pwsh.XXXXXX.pkg)"
         info "Downloading powershell-${PWSH_VER}-${PKG_ARCH}.pkg..."
-        curl -fsSL "https://github.com/PowerShell/PowerShell/releases/download/v${PWSH_VER}/powershell-${PWSH_VER}-${PKG_ARCH}.pkg" -o "$TMP_PKG"
-        info "Installing (requires sudo)..."
+        curl -fsSL "https://github.com/PowerShell/PowerShell/releases/download/v${PWSH_VER}/powershell-${PWSH_VER}-${PKG_ARCH}.pkg" \
+            -o "$TMP_PKG" --retry 3 --retry-delay 2
+        info "Installing package (requires sudo)..."
         sudo installer -pkg "$TMP_PKG" -target /
         rm -f "$TMP_PKG"
     fi
 }
 
 install_pwsh_linux() {
-    # snap — distro-agnostic, preferred
-    if command -v snap >/dev/null 2>&1; then
-        info "Installing PowerShell via snap..."
-        sudo snap install powershell --classic
-        return
-    fi
     # apt
     if command -v apt-get >/dev/null 2>&1; then
         info "Installing PowerShell via apt..."
@@ -79,6 +82,11 @@ install_pwsh_linux() {
     if command -v yum >/dev/null 2>&1; then
         info "Installing PowerShell via yum..."
         sudo yum install -y powershell && return
+    fi
+    # snap — last resort (classic confinement can block on some distros)
+    if command -v snap >/dev/null 2>&1; then
+        info "Installing PowerShell via snap..."
+        sudo snap install powershell --classic && return
     fi
     # tarball fallback → ~/.local
     case "$ARCH" in
