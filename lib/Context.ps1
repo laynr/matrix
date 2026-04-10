@@ -33,7 +33,9 @@ function Invoke-ContextSummary {
     $count = $msgs.Count
     if ($count -le 8) { return $false }
 
-    # Keep system prompt (index 0) and last 6 messages; summarize everything between
+    # Keep the first user message (msgs[0]) and last 6 messages; summarize everything between.
+    # Note: the system prompt is NOT stored in MatrixMessages — it is injected fresh on every
+    # API call in Network.ps1. msgs[0] is always the first user turn.
     $toSummarize = @($msgs[1..($count - 7)])
     $toKeep      = @($msgs[($count - 6)..($count - 1)])
 
@@ -65,7 +67,7 @@ function Invoke-ContextSummary {
             role    = "system"
             content = "[Earlier conversation summary] $summary"
         }
-        # Rebuild: original system placeholder + summary + recent 6 messages
+        # Rebuild: original first-user-turn + summary + recent 6 messages
         $global:MatrixMessages = @($msgs[0], $summaryMsg) + $toKeep
         Write-Host "  [context] Summarized $($toSummarize.Count) old turns to save space." -ForegroundColor DarkGray
         Write-MatrixLog -Message "Context summarized: compressed $($toSummarize.Count) messages"
@@ -78,7 +80,8 @@ function Invoke-ContextSummary {
 
 # Two-phase context management:
 #   Phase A — summarize old turns with Ollama at 75% token budget
-#   Phase B — smart prune (keep system[0], first user message, last 6) if summarization fails
+#   Phase B — smart prune (keep msgs[0] = first user turn, msgs[1] = second user turn, last 6)
+#             if summarization fails or is not applicable
 function Prune-Context {
     param([int]$MaxTokens = 100000, [int]$SummarizeAt = 75000)
 
@@ -105,6 +108,6 @@ function Prune-Context {
     if ($msgs.Count -gt 9) {
         $global:MatrixMessages = @($msgs[0], $msgs[1]) + @($msgs[($msgs.Count - 6)..($msgs.Count - 1)])
         Write-Host "  [context] Pruned old turns (summarization unavailable)." -ForegroundColor DarkGray
-        Write-MatrixLog -Message "Context hard-pruned: kept system[0], user[1], last 6"
+        Write-MatrixLog -Message "Context hard-pruned: kept first two user turns + last 6"
     }
 }
