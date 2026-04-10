@@ -929,6 +929,78 @@ if (-not $SchemaOnly) {
     Assert-True       "invalid service has error"  ($null -ne $obj.error)
 }
 
+# ── Get-EventLogEntries ───────────────────────────────────────────────────────
+Start-Suite "Get-EventLogEntries"
+Test-ToolSchema "Get-EventLogEntries"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "Get-EventLogEntries" @{ Newest = 10 }
+    Assert-ValidJson  "returns valid JSON"   $out
+    Assert-NoError    "no error"             $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has EntryCount"   $obj "EntryCount"
+    Assert-HasKey     "has LogSource"    $obj "LogSource"
+    Assert-HasKey     "has Entries"      $obj "Entries"
+    Assert-True       "EntryCount >= 0"  ($obj.EntryCount -ge 0)
+}
+
+# ── Get-ScheduledTaskList ─────────────────────────────────────────────────────
+Start-Suite "Get-ScheduledTaskList"
+Test-ToolSchema "Get-ScheduledTaskList"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "Get-ScheduledTaskList"
+    Assert-ValidJson  "returns valid JSON"   $out
+    Assert-NoError    "no error"             $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has Platform"     $obj "Platform"
+    Assert-HasKey     "has TaskCount"    $obj "TaskCount"
+    Assert-HasKey     "has Tasks"        $obj "Tasks"
+    Assert-True       "TaskCount >= 0"   ($obj.TaskCount -ge 0)
+}
+
+# ── Get-CertificateInfo ───────────────────────────────────────────────────────
+Start-Suite "Get-CertificateInfo"
+Test-ToolSchema "Get-CertificateInfo"
+if (-not $SchemaOnly) {
+    # Neither param provided
+    $out = Invoke-Tool "Get-CertificateInfo"
+    Assert-ValidJson  "no params returns JSON"  $out
+    $obj = Get-ToolOutput $out
+    Assert-True       "no params has error"  ($null -ne $obj.error)
+
+    # Both params provided
+    $out2 = Invoke-Tool "Get-CertificateInfo" @{ Path = "x.crt"; Url = "https://example.com" }
+    Assert-ValidJson  "both params returns JSON"  $out2
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "both params has error"  ($null -ne $obj2.error)
+
+    # Live HTTPS URL
+    $out3 = Invoke-Tool "Get-CertificateInfo" @{ Url = "https://example.com" }
+    Assert-ValidJson  "HTTPS URL returns JSON"  $out3
+    $obj3 = Get-ToolOutput $out3
+    if ($null -eq $obj3.error) {
+        Assert-HasKey "has Thumbprint"       $obj3 "Thumbprint"
+        Assert-HasKey "has DaysUntilExpiry"  $obj3 "DaysUntilExpiry"
+        Assert-True   "Thumbprint non-empty"  (-not [string]::IsNullOrWhiteSpace($obj3.Thumbprint))
+        Assert-True   "cert not expired"      ($obj3.DaysUntilExpiry -gt 0)
+    }
+    # If error (no network), just verify valid JSON was returned — already checked above
+}
+
+# ── Send-SystemNotification ───────────────────────────────────────────────────
+Start-Suite "Send-SystemNotification"
+Test-ToolSchema "Send-SystemNotification"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "Send-SystemNotification" @{ Title = "Matrix Test"; Message = "Wave 6 notification test" }
+    Assert-ValidJson  "returns valid JSON"   $out
+    Assert-NoError    "no error"             $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has Success"   $obj "Success"
+    Assert-HasKey     "has Method"    $obj "Method"
+    Assert-HasKey     "has Platform"  $obj "Platform"
+    # Success may be false in headless CI — just verify valid structure
+    Assert-True       "Success is bool"  ($obj.Success -is [bool] -or $obj.Success -eq $true -or $obj.Success -eq $false)
+}
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 $failed = Show-TestSummary
 exit $failed
