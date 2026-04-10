@@ -29,7 +29,7 @@ function Install-Ollama {
     if ($IsWindows) {
         if (Get-Command winget -EA SilentlyContinue) {
             Write-Info "Installing Ollama via winget..."
-            winget install --id Ollama.Ollama -e --source winget --silent
+            winget install --id Ollama.Ollama -e --source winget --silent | Out-Null
         } else {
             Write-Info "Downloading Ollama installer..."
             $tmp = [IO.Path]::ChangeExtension([IO.Path]::GetTempFileName(), ".exe")
@@ -40,6 +40,10 @@ function Install-Ollama {
         # Reload PATH
         $env:PATH = [Environment]::GetEnvironmentVariable("PATH","Machine") + ";" +
                     [Environment]::GetEnvironmentVariable("PATH","User")
+        # Stop the Ollama GUI app that the installer auto-launches — we will
+        # start 'ollama serve' headless below so the tray icon never appears
+        Start-Sleep -Seconds 2
+        Get-Process "ollama" -EA SilentlyContinue | Stop-Process -Force -EA SilentlyContinue
 
     } elseif ($IsMacOS) {
         if (Get-Command brew -EA SilentlyContinue) {
@@ -93,13 +97,18 @@ try { ollama list 2>$null | Out-Null; $ollamaRunning = $true } catch {}
 if (-not $ollamaRunning) {
     Write-Info "Starting Ollama service..."
     if ($IsWindows) {
+        # WindowStyle Hidden keeps it off-screen; no tray icon with 'serve'
         Start-Process -FilePath "ollama" -ArgumentList "serve" -WindowStyle Hidden
     } else {
         Start-Process -FilePath "ollama" -ArgumentList "serve" -RedirectStandardOutput "/dev/null" -RedirectStandardError "/dev/null"
     }
-    Start-Sleep -Seconds 4
-    try { ollama list 2>$null | Out-Null }
-    catch { Write-Fail "Ollama service failed to start. Run 'ollama serve' manually." }
+    # Poll until ready (up to 30 s) instead of a fixed sleep
+    $ready = $false
+    for ($i = 0; $i -lt 15; $i++) {
+        Start-Sleep -Seconds 2
+        try { ollama list 2>$null | Out-Null; $ready = $true; break } catch {}
+    }
+    if (-not $ready) { Write-Fail "Ollama service failed to start. Run 'ollama serve' manually." }
 }
 Write-Ok "Ollama service running"
 
@@ -137,7 +146,7 @@ try {
 $matrixScript = Join-Path $INSTALL_DIR "Matrix.ps1"
 
 if ($IsWindows) {
-    $binDir = Join-Path $HOME "bin"
+    $binDir = if ($env:MATRIX_BIN_DIR) { $env:MATRIX_BIN_DIR } else { Join-Path $HOME "bin" }
     if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir | Out-Null }
     $launcher = Join-Path $binDir "matrix.ps1"
     "& `"$matrixScript`" @args" | Set-Content $launcher -Encoding UTF8
