@@ -195,6 +195,17 @@ exec pwsh -NoProfile -ExecutionPolicy Bypass -File "$matrixScript" "`$@"
 Write-Host ""
 Write-Host "  ✓ Setup complete. Run 'matrix' anytime." -ForegroundColor Green
 Write-Host "  Override model: MATRIX_MODEL=gemma4:27b matrix"
+if (-not $IsWindows) {
+    $addedToProfile = $false
+    foreach ($p in @("$HOME/.zshrc", "$HOME/.bash_profile", "$HOME/.profile")) {
+        if ((Test-Path $p) -and (Get-Content $p -Raw -EA SilentlyContinue) -match [regex]::Escape($binDir)) {
+            $addedToProfile = $true; break
+        }
+    }
+    if ($addedToProfile) {
+        Write-Host "  New terminal? Run: source ~/.zshrc" -ForegroundColor DarkGray
+    }
+}
 Write-Host ""
 Write-Host "  Starting Matrix now..."
 Write-Host ""

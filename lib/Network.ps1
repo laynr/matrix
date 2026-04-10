@@ -155,14 +155,20 @@ function Invoke-MatrixStreamingChat {
             $client     = Get-MatrixHttpClient
             $reqContent = [System.Net.Http.StringContent]::new(
                 $bodyJson, [Text.Encoding]::UTF8, "application/json")
-            $httpResp   = $client.PostAsync($Config.Endpoint, $reqContent).GetAwaiter().GetResult()
+            $sw         = [System.Diagnostics.Stopwatch]::StartNew()
+            # ResponseHeadersRead: returns as soon as headers arrive so the body
+            # streams live. The default (ResponseContentRead) buffers everything
+            # first, making "streaming" appear as a single delayed dump.
+            $httpResp   = $client.PostAsync(
+                $Config.Endpoint, $reqContent,
+                [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead
+            ).GetAwaiter().GetResult()
             $httpResp.EnsureSuccessStatusCode() | Out-Null
             $reader     = [System.IO.StreamReader]::new(
                 $httpResp.Content.ReadAsStreamAsync().GetAwaiter().GetResult())
 
             $fullContent = [System.Text.StringBuilder]::new()
             $toolCalls   = $null
-            $sw          = [System.Diagnostics.Stopwatch]::StartNew()
 
             while (-not $reader.EndOfStream) {
                 $line = $reader.ReadLine()
