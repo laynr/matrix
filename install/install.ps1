@@ -64,7 +64,7 @@ if ($pwshOk) {
 Write-Info "Running cross-platform PowerShell installer..."
 Write-Host ""
 
-$installerUrl = "https://raw.githubusercontent.com/laynr/matrix/main/install.pwsh.ps1"
+$installerUrl = "https://raw.githubusercontent.com/laynr/matrix/main/install/install.pwsh.ps1"
 $tmp = [IO.Path]::ChangeExtension([IO.Path]::GetTempFileName(), ".ps1")
 Invoke-WebRequest $installerUrl -OutFile $tmp
 & pwsh -NoProfile -ExecutionPolicy Bypass -File $tmp
