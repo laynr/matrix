@@ -11,6 +11,25 @@ function Get-MatrixHttpClient {
     return $script:HttpClient
 }
 
+# Computes num_ctx from actual message payload so the KV cache is sized to fit
+# the conversation rather than allocating the model's maximum.
+# Override: set Config.NumCtx > 0 to pin a fixed value (e.g. for debugging).
+function Get-DynamicNumCtx {
+    param([array]$Messages, [int]$Override = 0, [int]$MaxCtx = 131072)
+    if ($Override -gt 0) { return $Override }
+
+    $totalChars = ($Messages | ForEach-Object {
+        $c = if ($_.content -is [string]) { $_.content } else { $_.content | ConvertTo-Json -Compress }
+        $c.Length
+    } | Measure-Object -Sum).Sum
+
+    # ~3.5 chars per token; 2x headroom for the model's response
+    $needed = [math]::Ceiling($totalChars / 3.5) * 2
+    # Round up to the nearest 512 for clean allocation, min 2048
+    $rounded = [math]::Max(2048, [math]::Ceiling($needed / 512) * 512)
+    return [math]::Min($MaxCtx, $rounded)
+}
+
 # Coerces a JSON-parsed value to the correct PowerShell type so tools receive
 # booleans, ints, and doubles rather than everything as a string.
 function Invoke-CoerceArg {
@@ -47,7 +66,7 @@ function Invoke-MatrixChat {
         @(@{ role = "system"; content = $Config.SystemPrompt }) + $Messages
     } else { $Messages }
 
-    $numCtx = if ($Config.NumCtx) { $Config.NumCtx } else { 8192 }
+    $numCtx = Get-DynamicNumCtx -Messages $messagesWithSystem -Override ([int]$Config.NumCtx)
     $body = @{
         model      = $Config.Model
         messages   = $messagesWithSystem
@@ -64,9 +83,14 @@ function Invoke-MatrixChat {
 
     for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
         try {
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
             $response = Invoke-RestMethod -Uri $Config.Endpoint -Method Post `
                 -ContentType "application/json" -Body $bodyJson -TimeoutSec 120
-            Write-MatrixLog -Message "RESPONSE: content_len=$($response.message.content.Length)"
+            $sw.Stop()
+            $outLen    = $response.message.content.Length
+            $outTok    = [math]::Ceiling($outLen / 3.5)
+            $tokRate   = if ($sw.Elapsed.TotalSeconds -gt 0) { [math]::Round($outTok / $sw.Elapsed.TotalSeconds, 1) } else { 0 }
+            Write-MatrixLog -Message "RESPONSE: elapsed=$($sw.ElapsedMilliseconds)ms content_len=$outLen ~${outTok}tok ${tokRate}tok/s"
             return $response
         } catch {
             $msg         = $_.Exception.Message
@@ -105,7 +129,7 @@ function Invoke-MatrixStreamingChat {
         $Messages
     }
 
-    $numCtx = if ($Config.NumCtx) { $Config.NumCtx } else { 8192 }
+    $numCtx = Get-DynamicNumCtx -Messages $messagesWithSystem -Override ([int]$Config.NumCtx)
     $body = @{
         model      = $Config.Model
         messages   = $messagesWithSystem
@@ -133,6 +157,7 @@ function Invoke-MatrixStreamingChat {
 
             $fullContent = [System.Text.StringBuilder]::new()
             $toolCalls   = $null
+            $sw          = [System.Diagnostics.Stopwatch]::StartNew()
 
             while (-not $reader.EndOfStream) {
                 $line = $reader.ReadLine()
@@ -150,7 +175,10 @@ function Invoke-MatrixStreamingChat {
                 } catch {}
             }
 
-            Write-MatrixLog -Message "RESPONSE: content_len=$($fullContent.Length) has_tools=$($null -ne $toolCalls)"
+            $sw.Stop()
+            $outTok  = [math]::Ceiling($fullContent.Length / 3.5)
+            $tokRate = if ($sw.Elapsed.TotalSeconds -gt 0) { [math]::Round($outTok / $sw.Elapsed.TotalSeconds, 1) } else { 0 }
+            Write-MatrixLog -Message "RESPONSE: elapsed=$($sw.ElapsedMilliseconds)ms content_len=$($fullContent.Length) ~${outTok}tok ${tokRate}tok/s has_tools=$($null -ne $toolCalls)"
             return @{
                 message = @{
                     role       = "assistant"

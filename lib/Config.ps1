@@ -20,7 +20,7 @@ function Load-Config {
         Model        = "gemma4:latest"
         Endpoint     = "http://localhost:11434/api/chat"
         SystemPrompt = "You are Matrix, a helpful AI agent. Use the tools available to you when they are needed to answer the user. Be concise and direct."
-        NumCtx       = 8192
+        NumCtx       = 0
     }
 }
 
