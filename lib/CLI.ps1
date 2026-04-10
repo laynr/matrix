@@ -38,6 +38,7 @@ function Stop-MatrixSpinner {
     $Spinner.Done.Set()
     [void]$Spinner.PS.EndInvoke($Spinner.Handle)
     $Spinner.PS.Dispose()
+    $Spinner.Done.Dispose()
 }
 
 # ── CLI entry point ───────────────────────────────────────────────────────────

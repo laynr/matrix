@@ -105,7 +105,11 @@ if ($CLI) {
     }
 
     function Process-AssistantMessage {
-        param($assistantMsg)
+        param($assistantMsg, [int]$Depth = 0)
+        if ($Depth -ge 10) {
+            Add-UIChatMessage -Role "system" -Message "[warn] Max tool call depth reached — stopping."
+            return
+        }
         $result = Invoke-MatrixToolchain -Message $assistantMsg.message
         if (-not [string]::IsNullOrWhiteSpace($result.TextOutput)) {
             Add-UIChatMessage -Role "assistant" -Message $result.TextOutput
@@ -123,7 +127,7 @@ if ($CLI) {
                 if ($resp.error) { Add-UIChatMessage -Role "system" -Message "Error: $($resp.error)" }
                 elseif ($resp.message) {
                     Add-Message -Role "assistant" -Content $resp.message.content
-                    Process-AssistantMessage -assistantMsg $resp
+                    Process-AssistantMessage -assistantMsg $resp -Depth ($Depth + 1)
                     Prune-Context
                 }
             }, [System.Windows.Threading.DispatcherPriority]::Background) | Out-Null

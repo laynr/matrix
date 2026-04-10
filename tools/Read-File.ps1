@@ -32,7 +32,7 @@ try {
         return @{ error = "'$resolved' is a directory, not a file." } | ConvertTo-Json -Compress
     }
 
-    $lines = Get-Content $resolved -Encoding UTF8
+    $lines = @(Get-Content $resolved -Encoding UTF8)
 
     $total = $lines.Count
     $from  = [math]::Max(1, $StartLine) - 1

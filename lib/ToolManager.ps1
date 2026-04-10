@@ -59,8 +59,8 @@ function Get-MatrixTools {
                     }
 
                     $pDesc = "Parameter $pName"
-                    if ($help -and $help.Parameters -and $help.Parameters[$pName]) {
-                        $pDesc = $help.Parameters[$pName].Trim()
+                    if ($help -and $help.Parameters -and $help.Parameters[$pName.ToUpper()]) {
+                        $pDesc = $help.Parameters[$pName.ToUpper()].Trim()
                     }
 
                     $properties[$pName] = @{ type = $pType; description = $pDesc }

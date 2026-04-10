@@ -4,6 +4,9 @@ Fetches a brief summary of a topic from Wikipedia.
 
 .DESCRIPTION
 This tool searches Wikipedia for a given topic and returns the introductory summary. Use this for general knowledge queries, definitions, or finding out who someone is.
+
+.PARAMETER Topic
+The topic or subject to look up on Wikipedia (e.g. "PowerShell", "Albert Einstein").
 #>
 [CmdletBinding()]
 param(
