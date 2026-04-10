@@ -42,6 +42,10 @@ try {
             }
         }
     } elseif ($IsLinux) {
+        if (-not (Get-Command 'systemctl' -ErrorAction SilentlyContinue)) {
+            return @{ error = "Service listing on Linux requires systemd (systemctl not found)." } |
+                ConvertTo-Json -Compress
+        }
         # systemctl --no-pager --plain -a list-units --type=service
         $lines = & systemctl list-units --type=service --no-pager --plain --all 2>/dev/null | Select-Object -Skip 1
         foreach ($line in $lines) {

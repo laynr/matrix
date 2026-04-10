@@ -38,38 +38,18 @@ try {
             }
         }
     } else {
-        # macOS / Linux — use nslookup
-        $queryType = if ($Type -eq 'ANY') { 'any' } else { $Type.ToLower() }
-        $output = & nslookup "-type=$queryType" $Hostname 2>/dev/null
-
-        if ($output) {
-            $inAnswer = $false
-            foreach ($line in $output) {
-                $line = $line.Trim()
-                if ($line -match '^Non-authoritative answer|^Authoritative answers') {
-                    $inAnswer = $true; continue
-                }
-                if (-not $inAnswer -and $line -match '^Name:\s+\S') { $inAnswer = $true }
-                if (-not $inAnswer) { continue }
-
-                # Parse common record types
-                if ($line -match 'address\s+(.+)$')        { $records += $Matches[1].Trim() }
-                elseif ($line -match 'mail exchanger\s+(.+)$') { $records += $Matches[1].Trim() }
-                elseif ($line -match 'name server\s*=\s*(.+)$') { $records += $Matches[1].Trim() }
-                elseif ($line -match 'canonical name\s*=\s*(.+)$') { $records += $Matches[1].Trim() }
-                elseif ($line -match 'text\s*=\s*"(.+)"$') { $records += $Matches[1].Trim() }
-                elseif ($line -match '"\s*(.+?)\s*"')       { $records += $Matches[1].Trim() }
-                elseif ($line -match '^Name:\s+(.+)$')      { $records += $Matches[1].Trim() }
+        # macOS / Linux — use .NET BCL (no external tools required)
+        if ($Type -in @('A', 'AAAA', 'ANY')) {
+            $addrs = [System.Net.Dns]::GetHostAddresses($Hostname) | Where-Object {
+                $Type -eq 'ANY' -or
+                ($Type -eq 'A'    -and $_.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork) -or
+                ($Type -eq 'AAAA' -and $_.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetworkV6)
             }
-        }
-
-        # Fallback: try dig if nslookup returned nothing
-        if ($records.Count -eq 0) {
-            $dig = Get-Command 'dig' -ErrorAction SilentlyContinue
-            if ($dig) {
-                $digOut = & dig +short $Hostname $Type 2>/dev/null
-                if ($digOut) { $records = @($digOut | Where-Object { $_.Trim() }) }
-            }
+            $records = @($addrs | ForEach-Object { $_.ToString() })
+        } else {
+            return @{
+                error = "Record type '$Type' lookups require 'dig' or 'nslookup' which are not pre-installed on this platform. Only A and AAAA lookups are supported without additional tools."
+            } | ConvertTo-Json -Compress
         }
     }
 

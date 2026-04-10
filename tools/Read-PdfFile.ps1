@@ -69,15 +69,9 @@ try {
 
     $text = $textParts -join "`n"
 
-    # Platform fallback: if text extraction yielded little, try pdftotext
-    if ($text.Length -lt 50) {
-        $pdftotext = Get-Command 'pdftotext' -ErrorAction SilentlyContinue
-        if ($pdftotext) {
-            $fallback = & pdftotext $resolved - 2>/dev/null
-            if ($fallback -and $fallback.Length -gt $text.Length) {
-                $text = $fallback -join "`n"
-            }
-        }
+    if ($text.Length -eq 0) {
+        return @{ error = "Could not extract text from this PDF. The file may be scanned, encrypted, or use unsupported encoding." } |
+            ConvertTo-Json -Compress
     }
 
     return @{

@@ -19,7 +19,7 @@ param(
 )
 
 try {
-    $tmpDir = if ($env:TMPDIR) { $env:TMPDIR } elseif ($env:TEMP) { $env:TEMP } else { '/tmp' }
+    $tmpDir = [System.IO.Path]::GetTempPath()
 
     $sessionFile = Join-Path $tmpDir "matrix-session-$([System.Guid]::NewGuid()).json"
 

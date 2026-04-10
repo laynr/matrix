@@ -67,6 +67,10 @@ try {
                 }
             }
         } else {
+            if (-not (Get-Command 'journalctl' -ErrorAction SilentlyContinue)) {
+                return @{ error = "No syslog file found and journalctl is not available on this system." } |
+                    ConvertTo-Json -Compress
+            }
             $logSource = "journalctl"
             $raw = & journalctl -n $Newest --no-pager --output short 2>/dev/null
             foreach ($line in $raw) {

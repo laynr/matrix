@@ -64,6 +64,13 @@ try {
         }
 
     } elseif ($IsLinux) {
+        if (-not (Get-Command 'notify-send' -ErrorAction SilentlyContinue)) {
+            return @{
+                Success = $false
+                Method  = ""
+                error   = "Linux desktop notifications require 'notify-send' (install libnotify-bin / libnotify)."
+            } | ConvertTo-Json -Depth 3 -Compress
+        }
         try {
             $timeoutMs = $TimeoutSec * 1000
             & notify-send -t $timeoutMs "$Title" "$Message" 2>$null

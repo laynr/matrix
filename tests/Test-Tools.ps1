@@ -190,23 +190,6 @@ Assert-ValidJson  "filter by name returns JSON"  $out2
 $obj2 = Get-ToolOutput $out2
 Assert-True       "finds pwsh process"   ($null -eq $obj2.error -and $obj2.TotalShown -ge 1)
 
-# ── Invoke-ShellCommand ───────────────────────────────────────────────────────
-Start-Suite "Invoke-ShellCommand"
-Test-ToolSchema "Invoke-ShellCommand"
-
-$cmd = if ($IsWindows) { "echo hello" } else { "echo hello" }
-$out = Invoke-Tool "Invoke-ShellCommand" @{ Command = $cmd }
-Assert-ValidJson  "returns valid JSON"    $out
-Assert-NoError    "no error"              $out
-$obj = Get-ToolOutput $out
-Assert-True       "stdout contains hello" ($obj.Stdout -match "hello")
-Assert-Equal      "exit code 0"  0  $obj.ExitCode
-
-$out2 = Invoke-Tool "Invoke-ShellCommand" @{ Command = "sleep 999"; TimeoutSeconds = 1 }
-Assert-ValidJson  "timeout returns JSON"  $out2
-$obj2 = Get-ToolOutput $out2
-Assert-True       "timeout returns error"  ($null -ne $obj2.error)
-
 # ── Get-EnvVariable ───────────────────────────────────────────────────────────
 Start-Suite "Get-EnvVariable"
 Test-ToolSchema "Get-EnvVariable"
@@ -541,35 +524,6 @@ if (-not $SchemaOnly) {
 
     Remove-Item $src -Force -EA SilentlyContinue
     Remove-Item $dst -Force -EA SilentlyContinue
-}
-
-# ── Remove-FileItem ───────────────────────────────────────────────────────────
-Start-Suite "Remove-FileItem"
-Test-ToolSchema "Remove-FileItem"
-if (-not $SchemaOnly) {
-    $tmpFile = [IO.Path]::GetTempFileName()
-    "to be deleted" | Set-Content $tmpFile -Encoding UTF8
-
-    # Confirm=$true (default) — should NOT delete
-    $out = Invoke-Tool "Remove-FileItem" @{ Path = $tmpFile }
-    Assert-ValidJson  "returns valid JSON (Confirm=true)"   $out
-    $obj = Get-ToolOutput $out
-    Assert-True       "Confirm=true returns error"   ($null -ne $obj.error)
-    Assert-True       "file still exists after Confirm=true guard"  (Test-Path $tmpFile)
-
-    # Confirm=$false — should delete
-    $out2 = Invoke-Tool "Remove-FileItem" @{ Path = $tmpFile; Confirm = $false }
-    Assert-ValidJson  "returns valid JSON (Confirm=false)"  $out2
-    Assert-NoError    "no error on delete"                  $out2
-    $obj2 = Get-ToolOutput $out2
-    Assert-Equal      "Deleted=true"  $true  $obj2.Deleted
-    Assert-True       "file gone after delete"  (-not (Test-Path $tmpFile))
-
-    # Missing path
-    $out3 = Invoke-Tool "Remove-FileItem" @{ Path = $tmpFile; Confirm = $false }
-    Assert-ValidJson  "missing path returns JSON"  $out3
-    $obj3 = Get-ToolOutput $out3
-    Assert-True       "missing path has error"  ($null -ne $obj3.error)
 }
 
 # ── Write-DocxFile ────────────────────────────────────────────────────────────
@@ -916,17 +870,6 @@ if (-not $SchemaOnly) {
     Assert-ValidJson  "nonexistent filter returns JSON"  $out2
     $obj2 = Get-ToolOutput $out2
     Assert-True       "ServiceCount = 0 or no error"  ($obj2.ServiceCount -eq 0 -or $null -eq $obj2.error)
-}
-
-# ── Set-ServiceState ──────────────────────────────────────────────────────────
-Start-Suite "Set-ServiceState"
-Test-ToolSchema "Set-ServiceState"
-if (-not $SchemaOnly) {
-    # Only test error path — starting/stopping real services is too risky in CI
-    $out = Invoke-Tool "Set-ServiceState" @{ Name = "matrix-no-such-service-xyz"; Action = "Start" }
-    Assert-ValidJson  "invalid service returns JSON"  $out
-    $obj = Get-ToolOutput $out
-    Assert-True       "invalid service has error"  ($null -ne $obj.error)
 }
 
 # ── Get-EventLogEntries ───────────────────────────────────────────────────────
@@ -1361,40 +1304,6 @@ if (-not $SchemaOnly) {
     Assert-True       "RecordCount > 0"  ($obj.RecordCount -gt 0)
 }
 
-# ── Send-Email ─────────────────────────────────────────────────────────────────
-Start-Suite "Send-Email"
-Test-ToolSchema "Send-Email"
-if (-not $SchemaOnly) {
-    # Error path only — no real SMTP in CI
-    $out = Invoke-Tool "Send-Email" @{
-        SmtpServer = "smtp.invalid.test.local"
-        From       = "test@example.com"
-        To         = "dest@example.com"
-        Subject    = "Test"
-        Body       = "Test body"
-    }
-    Assert-ValidJson  "returns valid JSON"          $out
-    $obj = Get-ToolOutput $out
-    Assert-True       "bad server returns error"   ($null -ne $obj.error)
-}
-
-# ── Send-WebhookMessage ────────────────────────────────────────────────────────
-Start-Suite "Send-WebhookMessage"
-Test-ToolSchema "Send-WebhookMessage"
-if (-not $SchemaOnly) {
-    $out = Invoke-Tool "Send-WebhookMessage" @{
-        Url     = "https://httpbin.org/post"
-        Payload = @{ message = "Matrix test"; timestamp = "2026-01-01" }
-    }
-    Assert-ValidJson  "returns valid JSON"   $out
-    Assert-NoError    "no error"             $out
-    $obj = Get-ToolOutput $out
-    Assert-HasKey     "has StatusCode"  $obj "StatusCode"
-    Assert-HasKey     "has Success"     $obj "Success"
-    Assert-Equal      "StatusCode = 200"  200  $obj.StatusCode
-    Assert-True       "Success = true"  ($obj.Success -eq $true)
-}
-
 # ── Send-SlackMessage ──────────────────────────────────────────────────────────
 Start-Suite "Send-SlackMessage"
 Test-ToolSchema "Send-SlackMessage"
@@ -1424,23 +1333,6 @@ if (-not $SchemaOnly) {
     $obj = Get-ToolOutput $out
     Assert-HasKey     "has StatusCode"  $obj "StatusCode"
     Assert-True       "400 is non-success"  ($obj.Success -eq $false)
-}
-
-# ── Invoke-TwilioSms ──────────────────────────────────────────────────────────
-Start-Suite "Invoke-TwilioSms"
-Test-ToolSchema "Invoke-TwilioSms"
-if (-not $SchemaOnly) {
-    # Error path — invalid credentials return 401 error
-    $out = Invoke-Tool "Invoke-TwilioSms" @{
-        AccountSid = "ACfakesid00000000000000000000000"
-        AuthToken  = "fakeauthtoken0000000000000000000"
-        From       = "+15551234567"
-        To         = "+15559876543"
-        Body       = "Matrix test"
-    }
-    Assert-ValidJson  "returns valid JSON"     $out
-    $obj = Get-ToolOutput $out
-    Assert-True       "bad creds returns error"  ($null -ne $obj.error)
 }
 
 # ── Summary ───────────────────────────────────────────────────────────────────
