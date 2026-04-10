@@ -52,9 +52,9 @@ function Limit-ToolResult {
     param([string]$Result)
     if (-not $Result -or $Result.Length -le $script:MaxToolResultChars) { return $Result }
     $omitted = $Result.Length - $script:MaxToolResultChars
-    Write-MatrixLog "Tool result truncated: $omitted chars omitted"
+    Write-MatrixLog "Tool result truncated: $omitted chars omitted (total $($Result.Length))"
     return $Result.Substring(0, $script:MaxToolResultChars) +
-           "`n[... $omitted characters truncated — full result in err.log]"
+           "`n[... $omitted characters omitted — result was truncated to fit context window]"
 }
 
 # Blocking (non-streaming) chat call — used by the Windows GUI path.
@@ -297,8 +297,9 @@ function Invoke-MatrixToolchain {
 
         $truncated = Limit-ToolResult $raw
         Write-MatrixLog -Message "Tool result ($($rs.Name)): $truncated"
+        $preview = if ($truncated.Length -gt 200) { $truncated.Substring(0, 200) + '...' } else { $truncated }
         Write-Host "  [tool]   $($rs.Name)" -ForegroundColor DarkCyan
-        Write-Host "  [result] $truncated" -ForegroundColor DarkGray
+        Write-Host "  [result] $preview" -ForegroundColor DarkGray
 
         $toolResults += @{ role = "tool"; content = $truncated }
     }
