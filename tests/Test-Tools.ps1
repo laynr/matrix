@@ -1145,6 +1145,113 @@ if (-not $SchemaOnly) {
     Remove-Item $tmpPptx -Force -EA SilentlyContinue
 }
 
+# ── Write-PdfFile ─────────────────────────────────────────────────────────────
+Start-Suite "Write-PdfFile"
+Test-ToolSchema "Write-PdfFile"
+if (-not $SchemaOnly) {
+    $tmpPdf = [IO.Path]::GetTempFileName() -replace '\.tmp$','.pdf'
+    Remove-Item $tmpPdf -Force -EA SilentlyContinue
+    $out = Invoke-Tool "Write-PdfFile" @{ Path = $tmpPdf; Lines = @("Hello PDF","Line two","Line three") }
+    Assert-ValidJson  "returns valid JSON"  $out
+    Assert-NoError    "no error"            $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has PageCount"  $obj "PageCount"
+    Assert-HasKey     "has LineCount"  $obj "LineCount"
+    Assert-HasKey     "has SizeBytes"  $obj "SizeBytes"
+    Assert-True       "file created"   (Test-Path $tmpPdf)
+    Assert-True       "size > 0"       ($obj.SizeBytes -gt 0)
+    Assert-Equal      "LineCount = 3"  3  $obj.LineCount
+
+    $out2 = Invoke-Tool "Write-PdfFile" @{ Path = $tmpPdf; Lines = @("x") }
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "overwrite guard"  ($null -ne $obj2.error)
+    Remove-Item $tmpPdf -Force -EA SilentlyContinue
+}
+
+# ── Read-PdfFile ───────────────────────────────────────────────────────────────
+Start-Suite "Read-PdfFile"
+Test-ToolSchema "Read-PdfFile"
+if (-not $SchemaOnly) {
+    $tmpPdf = [IO.Path]::GetTempFileName() -replace '\.tmp$','.pdf'
+    Remove-Item $tmpPdf -Force -EA SilentlyContinue
+    Invoke-Tool "Write-PdfFile" @{ Path = $tmpPdf; Lines = @("Hello PDF World","Second line here") } | Out-Null
+    $out = Invoke-Tool "Read-PdfFile" @{ Path = $tmpPdf }
+    Assert-ValidJson  "returns valid JSON"  $out
+    Assert-NoError    "no error"            $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has PageCount"  $obj "PageCount"
+    Assert-HasKey     "has Text"       $obj "Text"
+    Assert-HasKey     "has CharCount"  $obj "CharCount"
+    Assert-True       "CharCount > 0"  ($obj.CharCount -gt 0)
+
+    $out2 = Invoke-Tool "Read-PdfFile" @{ Path = (Join-Path ([IO.Path]::GetTempPath()) "no-such.pdf") }
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "missing file error"  ($null -ne $obj2.error)
+    Remove-Item $tmpPdf -Force -EA SilentlyContinue
+}
+
+# ── Get-ImageMetadata ──────────────────────────────────────────────────────────
+Start-Suite "Get-ImageMetadata"
+Test-ToolSchema "Get-ImageMetadata"
+if (-not $SchemaOnly) {
+    # Use a non-JPEG file — no EXIF expected
+    $tmpPng = [IO.Path]::GetTempFileName() -replace '\.tmp$','.png'
+    [IO.File]::WriteAllBytes($tmpPng, [byte[]]@(0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A))
+    $out = Invoke-Tool "Get-ImageMetadata" @{ Path = $tmpPng }
+    Assert-ValidJson  "returns valid JSON"   $out
+    Assert-NoError    "no error for PNG"     $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has Format"    $obj "Format"
+    Assert-HasKey     "has HasExif"   $obj "HasExif"
+    Assert-True       "HasExif false for non-JPEG"  ($obj.HasExif -eq $false)
+
+    $out2 = Invoke-Tool "Get-ImageMetadata" @{ Path = (Join-Path ([IO.Path]::GetTempPath()) "no-such.jpg") }
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "missing file error"  ($null -ne $obj2.error)
+    Remove-Item $tmpPng -Force -EA SilentlyContinue
+}
+
+# ── Search-Images ──────────────────────────────────────────────────────────────
+Start-Suite "Search-Images"
+Test-ToolSchema "Search-Images"
+if (-not $SchemaOnly) {
+    $tmpDir = Join-Path ([IO.Path]::GetTempPath()) "matrix-imgsch-$(New-Guid)"
+    New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+    # Create dummy jpg files
+    'fake' | Set-Content (Join-Path $tmpDir "a.jpg") -Encoding UTF8
+    'fake' | Set-Content (Join-Path $tmpDir "b.jpg") -Encoding UTF8
+    $out = Invoke-Tool "Search-Images" @{ Path = $tmpDir }
+    Assert-ValidJson  "returns valid JSON"    $out
+    Assert-NoError    "no error"              $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has TotalScanned"  $obj "TotalScanned"
+    Assert-HasKey     "has MatchCount"    $obj "MatchCount"
+    Assert-HasKey     "has Images"        $obj "Images"
+    Assert-Equal      "TotalScanned = 2"  2  $obj.TotalScanned
+    Remove-Item $tmpDir -Recurse -Force -EA SilentlyContinue
+}
+
+# ── Sort-ImageFiles ────────────────────────────────────────────────────────────
+Start-Suite "Sort-ImageFiles"
+Test-ToolSchema "Sort-ImageFiles"
+if (-not $SchemaOnly) {
+    $tmpSrc = Join-Path ([IO.Path]::GetTempPath()) "matrix-imgsort-$(New-Guid)"
+    $tmpDst = Join-Path ([IO.Path]::GetTempPath()) "matrix-imgsort-dst-$(New-Guid)"
+    New-Item -ItemType Directory -Path $tmpSrc -Force | Out-Null
+    'fake' | Set-Content (Join-Path $tmpSrc "photo.jpg") -Encoding UTF8
+    $out = Invoke-Tool "Sort-ImageFiles" @{ SourcePath = $tmpSrc; DestinationPath = $tmpDst }
+    Assert-ValidJson  "returns valid JSON"   $out
+    Assert-NoError    "no error"             $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has TotalFiles"      $obj "TotalFiles"
+    Assert-HasKey     "has Sorted"          $obj "Sorted"
+    Assert-HasKey     "has FoldersCreated"  $obj "FoldersCreated"
+    Assert-Equal      "TotalFiles = 1"  1   $obj.TotalFiles
+    Assert-Equal      "Sorted = 1"      1   $obj.Sorted
+    Remove-Item $tmpSrc -Recurse -Force -EA SilentlyContinue
+    Remove-Item $tmpDst -Recurse -Force -EA SilentlyContinue
+}
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 $failed = Show-TestSummary
 exit $failed
