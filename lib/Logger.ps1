@@ -4,8 +4,16 @@ function Write-MatrixLog {
         [string]$Message,
         [string]$Level = "INFO"
     )
-    
+
     $logPath = Join-Path $global:MatrixRoot "err.log"
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "[{0}] [{1}] {2}" -f $timestamp, $Level, $Message | Out-File $logPath -Append -Encoding UTF8
+    $line    = "[{0}] [{1}] {2}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Level, $Message
+    $mutex   = $null
+    try {
+        $mutex = [System.Threading.Mutex]::new($false, 'Global\MatrixLogMutex')
+        [void]$mutex.WaitOne(3000)
+        Add-Content -Path $logPath -Value $line -Encoding UTF8
+    } finally {
+        try { $mutex.ReleaseMutex() } catch {}
+        if ($mutex) { $mutex.Dispose() }
+    }
 }
