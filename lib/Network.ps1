@@ -1,6 +1,15 @@
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $script:MaxToolResultChars = 8000
+$script:HttpClient         = $null
+
+function Get-MatrixHttpClient {
+    if (-not $script:HttpClient) {
+        $script:HttpClient         = [System.Net.Http.HttpClient]::new()
+        $script:HttpClient.Timeout = [TimeSpan]::FromSeconds(120)
+    }
+    return $script:HttpClient
+}
 
 # Coerces a JSON-parsed value to the correct PowerShell type so tools receive
 # booleans, ints, and doubles rather than everything as a string.
@@ -38,10 +47,17 @@ function Invoke-MatrixChat {
         @(@{ role = "system"; content = $Config.SystemPrompt }) + $Messages
     } else { $Messages }
 
-    $body = @{ model = $Config.Model; messages = $messagesWithSystem; stream = $false }
+    $numCtx = if ($Config.NumCtx) { $Config.NumCtx } else { 8192 }
+    $body = @{
+        model      = $Config.Model
+        messages   = $messagesWithSystem
+        stream     = $false
+        keep_alive = "-1"
+        options    = @{ num_ctx = $numCtx }
+    }
     if ($Tools -and $Tools.Count -gt 0) { $body.tools = $Tools }
     $bodyJson = $body | ConvertTo-Json -Depth 10 -Compress
-    Write-MatrixLog -Message "REQUEST (blocking): model=$($Config.Model) messages=$($messagesWithSystem.Count)"
+    Write-MatrixLog -Message "REQUEST (blocking): model=$($Config.Model) messages=$($messagesWithSystem.Count) num_ctx=$numCtx"
 
     $maxRetries = 3
     $delay      = 1
@@ -89,20 +105,25 @@ function Invoke-MatrixStreamingChat {
         $Messages
     }
 
-    $body = @{ model = $Config.Model; messages = $messagesWithSystem; stream = $true }
+    $numCtx = if ($Config.NumCtx) { $Config.NumCtx } else { 8192 }
+    $body = @{
+        model      = $Config.Model
+        messages   = $messagesWithSystem
+        stream     = $true
+        keep_alive = "-1"
+        options    = @{ num_ctx = $numCtx }
+    }
     if ($Tools -and $Tools.Count -gt 0) { $body.tools = $Tools }
     $bodyJson = $body | ConvertTo-Json -Depth 10 -Compress
-    Write-MatrixLog -Message "REQUEST (streaming): model=$($Config.Model) messages=$($messagesWithSystem.Count)"
+    Write-MatrixLog -Message "REQUEST (streaming): model=$($Config.Model) messages=$($messagesWithSystem.Count) num_ctx=$numCtx"
 
     $maxRetries = 3
     $delay      = 1
 
     for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
-        $client = $null
         $reader = $null
         try {
-            $client     = [System.Net.Http.HttpClient]::new()
-            $client.Timeout = [TimeSpan]::FromSeconds(120)
+            $client     = Get-MatrixHttpClient
             $reqContent = [System.Net.Http.StringContent]::new(
                 $bodyJson, [Text.Encoding]::UTF8, "application/json")
             $httpResp   = $client.PostAsync($Config.Endpoint, $reqContent).GetAwaiter().GetResult()
@@ -155,8 +176,7 @@ function Invoke-MatrixStreamingChat {
                 return @{ error = $msg }
             }
         } finally {
-            if ($reader) { try { $reader.Dispose()  } catch {} }
-            if ($client) { try { $client.Dispose()  } catch {} }
+            if ($reader) { try { $reader.Dispose() } catch {} }
         }
     }
 }
