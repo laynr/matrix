@@ -125,14 +125,19 @@ fi
 info "Running cross-platform PowerShell installer..."
 echo ""
 
-TMP_PS="$(mktemp /tmp/matrix_install.XXXXXX.ps1)"
+TMP_PS="$(mktemp /tmp/matrix_install.XXXXXX)"
+TMP_PS_EXT="${TMP_PS}.ps1"
+mv "$TMP_PS" "$TMP_PS_EXT"
+TMP_PS="$TMP_PS_EXT"
 curl -fsSL "$PWSH_INSTALLER_URL" -o "$TMP_PS"
 
 # Launch with /dev/tty so the agent started at the end can accept input
 if [ -t 0 ]; then
     pwsh -NoProfile -ExecutionPolicy Bypass -File "$TMP_PS"
-else
+elif ( exec </dev/tty ) 2>/dev/null; then
     pwsh -NoProfile -ExecutionPolicy Bypass -File "$TMP_PS" </dev/tty
+else
+    pwsh -NoProfile -ExecutionPolicy Bypass -File "$TMP_PS"
 fi
 
 rm -f "$TMP_PS"

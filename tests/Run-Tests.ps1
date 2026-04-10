@@ -59,6 +59,22 @@ $testsDir = $PSScriptRoot
 # Install always runs first — validates deploy layout before code tests
 if ($Suite -in @("All","Install")) {
     Run-Suite "Install / Uninstall" (Join-Path $testsDir "Test-Install.ps1") @{ SchemaOnly = $SchemaOnly }
+
+    # Shell bootstrap test — non-Windows only
+    if (-not $IsWindows) {
+        $shTest = Join-Path $testsDir "Test-Install.sh"
+        Write-Host ("─" * 50)
+        Write-Host "  Running: install.sh (shell bootstrap)" -ForegroundColor White
+        try {
+            sh $shTest
+            $shExit = $LASTEXITCODE
+        } catch {
+            Write-Host "  [ERROR] Test-Install.sh threw: $_" -ForegroundColor Red
+            $shExit = 1
+        }
+        $script:suiteResults += [PSCustomObject]@{ Suite = "install.sh bootstrap"; ExitCode = $shExit }
+        $script:totalFailed  += $shExit
+    }
 }
 if ($Suite -in @("All","Tools")) {
     Run-Suite "Tool Unit Tests" (Join-Path $testsDir "Test-Tools.ps1") @{ SchemaOnly = $SchemaOnly }
