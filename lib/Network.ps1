@@ -182,6 +182,7 @@ function Invoke-MatrixStreamingChat {
                     $token = $chunk.message.content
                     if ($token) {
                         [Console]::Write($token)
+                        [Console]::Out.Flush()
                         [void]$fullContent.Append($token)
                     }
                     if ($chunk.message.tool_calls) {
