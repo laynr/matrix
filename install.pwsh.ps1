@@ -169,6 +169,9 @@ if ($IsWindows) {
     }
 
     $launcher = Join-Path $binDir "matrix"
+    # Remove existing file or stale symlink — Set-Content follows symlinks and
+    # fails if the symlink target doesn't exist yet (e.g. re-install scenario)
+    Remove-Item $launcher -Force -EA SilentlyContinue
     @"
 #!/usr/bin/env sh
 exec pwsh -NoProfile -ExecutionPolicy Bypass -File "$matrixScript" "`$@"

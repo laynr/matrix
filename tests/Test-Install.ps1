@@ -197,6 +197,10 @@ if (-not $IsWindows) {
     New-Item -ItemType Directory -Path $candidateBin  -Force | Out-Null
     New-Item -ItemType Directory -Path $candidateHome -Force | Out-Null
 
+    # Simulate re-install: plant a stale symlink where the launcher will be written
+    $staleLauncher = Join-Path $candidateBin "matrix"
+    New-Item -ItemType SymbolicLink -Path $staleLauncher -Target "/nonexistent/matrix" -Force | Out-Null
+
     $zipPath2 = $null
     try {
         $zipPath2 = New-TestReleaseZip
