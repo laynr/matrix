@@ -8,7 +8,7 @@ function Load-Config {
                 Model        = [string]$json.Model
                 Endpoint     = [string]$json.Endpoint
                 SystemPrompt = [string]$json.SystemPrompt
-                NumCtx       = if ($json.NumCtx) { [int]$json.NumCtx } else { 8192 }
+                NumCtx       = if ($null -ne $json.NumCtx) { [int]$json.NumCtx } else { 0 }
             }
         } catch {
             Write-Warning "Failed to parse config.json — using defaults. $_"
