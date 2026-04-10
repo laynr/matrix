@@ -188,7 +188,9 @@ function Invoke-MatrixStreamingChat {
                     if ($chunk.message.tool_calls) {
                         $toolCalls = $chunk.message.tool_calls
                     }
-                } catch {}
+                } catch {
+                    Write-MatrixLog -Level "WARN" -Message "Malformed chunk skipped: $line"
+                }
             }
 
             $sw.Stop()
@@ -275,6 +277,15 @@ function Invoke-MatrixToolchain {
             }
         }
 
+        # Show tool call with arg preview before dispatch
+        $argPreview = if ($argsHash.Count -gt 0) {
+            ($argsHash.GetEnumerator() | Sort-Object Name | ForEach-Object {
+                $v = [string]$_.Value
+                if ($v.Length -gt 30) { $v = $v.Substring(0, 27) + '...' }
+                "$($_.Name)=$v"
+            }) -join ", "
+        } else { "" }
+        Write-Host "  ⟳ $name$(if ($argPreview) { "($argPreview)" })" -ForegroundColor DarkCyan
         Write-MatrixLog -Message "Dispatching tool: $name  args: $($argsHash | ConvertTo-Json -Compress)"
 
         $ps = [PowerShell]::Create()
@@ -300,9 +311,11 @@ function Invoke-MatrixToolchain {
 
         $truncated = Limit-ToolResult $raw
         Write-MatrixLog -Message "Tool result ($($rs.Name)): $truncated"
-        $preview = if ($truncated.Length -gt 200) { $truncated.Substring(0, 200) + '...' } else { $truncated }
-        Write-Host "  [tool]   $($rs.Name)" -ForegroundColor DarkCyan
-        Write-Host "  [result] $preview" -ForegroundColor DarkGray
+        $isError = $truncated -match '"error"\s*:'
+        $icon    = if ($isError) { "✗" } else { "✓" }
+        $color   = if ($isError) { "Red" } else { "DarkGreen" }
+        $preview = if ($truncated.Length -gt 80) { $truncated.Substring(0, 77) + '...' } else { $truncated }
+        Write-Host "  $icon $($rs.Name) → $preview" -ForegroundColor $color
 
         $toolResults += @{ role = "tool"; content = $truncated }
     }

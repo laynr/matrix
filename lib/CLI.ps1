@@ -1,75 +1,99 @@
-# ── Spinner ───────────────────────────────────────────────────────────────────
-# Utility spinner for long-running operations (not used in the streaming agent
-# loop — streaming output provides live feedback on its own).
+# ── CLI helpers ───────────────────────────────────────────────────────────────
 
-function Start-MatrixSpinner {
-    param([string]$Label = "thinking")
-
-    # Braille frames on UTF-8 terminals; ASCII fallback for old Windows consoles
-    $frames = if ($IsWindows -and [Console]::OutputEncoding.CodePage -ne 65001) {
-        @('|', '/', '-', '\')
-    } else {
-        @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
-    }
-
-    $done = [System.Threading.ManualResetEventSlim]::new($false)
-    $ps   = [PowerShell]::Create()
-    [void]$ps.AddScript({
-        param($evt, $lbl, $fr)
-        $i = 0
-        while (-not $evt.IsSet) {
-            [Console]::Write("`r  $($fr[$i % $fr.Count]) $lbl...")
-            [System.Threading.Thread]::Sleep(80)
-            $i++
-        }
-        [Console]::Write("`r" + (' ' * ($lbl.Length + 16)) + "`r")
-    }).AddArgument($done).AddArgument($Label).AddArgument($frames) | Out-Null
-
-    return [PSCustomObject]@{
-        Done   = $done
-        PS     = $ps
-        Handle = $ps.BeginInvoke()
-    }
+function Show-MatrixError {
+    param([string]$Message)
+    $inner  = "  $Message  "
+    $width  = [math]::Max($inner.Length, 10)
+    $bar    = "─" * $width
+    Write-Host ""
+    Write-Host "  ┌$bar┐" -ForegroundColor Red
+    Write-Host "  │$inner│" -ForegroundColor Red
+    Write-Host "  └$bar┘" -ForegroundColor Red
+    Write-Host ""
 }
 
-function Stop-MatrixSpinner {
-    param($Spinner)
-    if (-not $Spinner) { return }
-    $Spinner.Done.Set()
-    [void]$Spinner.PS.EndInvoke($Spinner.Handle)
-    $Spinner.PS.Dispose()
-    $Spinner.Done.Dispose()
+function Show-ContextStatus {
+    if ($global:MatrixMessages.Count -eq 0) { return }
+    $total = Get-ContextTokenCount
+    if ($total -le 0) { return }
+    $max   = if ($global:Config.MaxTokens) { $global:Config.MaxTokens } else { 100000 }
+    $pct   = [math]::Round($total / $max * 100)
+    $color = if ($pct -ge 90) { "Red" } elseif ($pct -ge 75) { "Yellow" } elseif ($pct -ge 50) { "DarkYellow" } else { "DarkGray" }
+    Write-Host "  [ctx ~$total tok · $pct%]" -ForegroundColor $color
+}
+
+function Show-MatrixHelp {
+    Write-Host ""
+    Write-Host "  Commands:" -ForegroundColor Cyan
+    Write-Host "    exit    " -NoNewline -ForegroundColor White
+    Write-Host "— quit Matrix"
+    Write-Host "    quit    " -NoNewline -ForegroundColor White
+    Write-Host "— quit Matrix"
+    Write-Host "    reload  " -NoNewline -ForegroundColor White
+    Write-Host "— rescan tools/ directory"
+    Write-Host "    clear   " -NoNewline -ForegroundColor White
+    Write-Host "— reset conversation history"
+    Write-Host "    tools   " -NoNewline -ForegroundColor White
+    Write-Host "— list loaded tools with descriptions"
+    Write-Host "    help    " -NoNewline -ForegroundColor White
+    Write-Host "— show this help"
+    Write-Host ""
+}
+
+function Show-MatrixToolsList {
+    $t = Get-MatrixTools
+    Write-Host ""
+    Write-Host "  Loaded tools ($($t.Count)):" -ForegroundColor Cyan
+    foreach ($tool in ($t | Sort-Object { $_.function.name })) {
+        Write-Host "    $($tool.function.name.PadRight(26))" -NoNewline -ForegroundColor White
+        Write-Host " $($tool.function.description)" -ForegroundColor DarkGray
+    }
+    Write-Host ""
 }
 
 # ── CLI entry point ───────────────────────────────────────────────────────────
 function Show-MatrixCLI {
-    # Version from .version file
+    $versionStr = ""
     $versionFile = Join-Path $global:MatrixRoot ".version"
-    $versionStr  = ""
     if (Test-Path $versionFile) {
         try {
             $v = Get-Content $versionFile -Raw | ConvertFrom-Json
             if ($v.PublishedAt) {
-                $versionStr = "  Version  : $([datetime]$v.PublishedAt | Get-Date -Format 'yyyy-MM-dd')"
+                $versionStr = "$([datetime]$v.PublishedAt | Get-Date -Format 'yyyy-MM-dd')"
             }
         } catch {}
     }
 
+    $tools  = Get-MatrixTools
+    $max    = if ($global:Config.MaxTokens)   { $global:Config.MaxTokens }   else { 100000 }
+    $sumAt  = if ($global:Config.SummarizeAt) { $global:Config.SummarizeAt } else { 75000 }
+    $ep     = $global:Config.Endpoint
+    if ($ep.Length -gt 45) { $ep = $ep.Substring(0, 42) + '...' }
+    $sep    = "─" * 52
+
     Write-Host ""
-    Write-Host "  +----------------------------------+" -ForegroundColor Cyan
-    Write-Host "  |          M A T R I X             |" -ForegroundColor Cyan
-    Write-Host "  |     AI Agent  *  Ollama           |" -ForegroundColor Cyan
-    Write-Host "  +----------------------------------+" -ForegroundColor Cyan
-    Write-Host "  Model    : $($global:Config.Model)"
-    Write-Host "  Endpoint : $($global:Config.Endpoint)"
-    if ($versionStr) { Write-Host $versionStr }
-    $tools = Get-MatrixTools
-    Write-Host "  Tools    : $($tools.Count) loaded"
+    Write-Host "  $sep" -ForegroundColor DarkCyan
+    Write-Host "   M A T R I X  ·  AI Agent  ·  Ollama" -ForegroundColor Cyan
+    Write-Host "  $sep" -ForegroundColor DarkCyan
+    Write-Host "   Model    : $($global:Config.Model)"
+    Write-Host "   Endpoint : $ep"
+    Write-Host "   Context  : $max max tokens · summarize at $sumAt" -ForegroundColor DarkGray
+    Write-Host "   Tools    : $($tools.Count) loaded"
+    if ($versionStr) { Write-Host "   Version  : $versionStr" -ForegroundColor DarkGray }
+    Write-Host "  $sep" -ForegroundColor DarkCyan
+    Write-Host "   Type 'help' for commands · 'exit' to quit" -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  Type 'reload' to rescan tools.  Type 'exit' to quit."
-    Write-Host ("─" * 42)
+
+    # Report any broken tools discovered at startup
+    if ($script:ToolDiscoveryErrors -and $script:ToolDiscoveryErrors.Count -gt 0) {
+        foreach ($e in $script:ToolDiscoveryErrors) {
+            Write-Host "  [warn] '$($e.Name)' failed to load: $($e.Error)" -ForegroundColor Yellow
+        }
+        Write-Host ""
+    }
 
     while ($true) {
+        Show-ContextStatus
         Write-Host ""
         $inputMsg = Read-Host "You"
         if ([string]::IsNullOrWhiteSpace($inputMsg)) { continue }
@@ -88,6 +112,19 @@ function Show-MatrixCLI {
                 }
                 continue
             }
+            "clear" {
+                Clear-Messages
+                Write-Host "  Context cleared." -ForegroundColor DarkGray
+                continue
+            }
+            "help" {
+                Show-MatrixHelp
+                continue
+            }
+            "tools" {
+                Show-MatrixToolsList
+                continue
+            }
         }
 
         Add-Message -Role "user" -Content $inputMsg
@@ -96,7 +133,7 @@ function Show-MatrixCLI {
             Process-OllamaMessage -Tools $tools
             Prune-Context
         } catch {
-            Write-Host "  [exception] $_" -ForegroundColor Red
+            Show-MatrixError $_
         }
     }
 }
@@ -115,14 +152,16 @@ function Process-OllamaMessage {
         return
     }
 
-    # Print prefix then stream — tokens appear live as the model generates them
+    # Turn separator + streaming prefix
     Write-Host ""
-    Write-Host -NoNewline "  Matrix: " -ForegroundColor Cyan
+    Write-Host ("  " + "─" * 50) -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host -NoNewline "  Matrix ▸ " -ForegroundColor Cyan
     $response = Invoke-MatrixStreamingChat -Config $global:Config -Messages (Get-Messages) -Tools $Tools
-    Write-Host ""  # newline after last token (or after blank tool-only response)
+    Write-Host ""  # newline after last streamed token
 
     if ($response.error) {
-        Write-Host "  [error] $($response.error)" -ForegroundColor Red
+        Show-MatrixError $response.error
         return
     }
 
