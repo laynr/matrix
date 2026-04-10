@@ -840,6 +840,95 @@ if (-not $SchemaOnly) {
     Assert-True       "has Success or error field"  ($null -ne $obj.Success -or $null -ne $obj.error)
 }
 
+# ── Protect-String ────────────────────────────────────────────────────────────
+Start-Suite "Protect-String"
+Test-ToolSchema "Protect-String"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "Protect-String" @{ Text = "hello world"; Password = "s3cr3t" }
+    Assert-ValidJson  "returns valid JSON"    $out
+    Assert-NoError    "no error"              $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has CipherText"    $obj "CipherText"
+    Assert-HasKey     "has Algorithm"     $obj "Algorithm"
+    Assert-Equal      "Algorithm correct"  "AES-256-CBC"  $obj.Algorithm
+    Assert-True       "CipherText non-empty"  (-not [string]::IsNullOrWhiteSpace($obj.CipherText))
+    Assert-True       "CipherText changes each call"  ($obj.CipherText -ne (Get-ToolOutput (Invoke-Tool "Protect-String" @{ Text = "hello world"; Password = "s3cr3t" })).CipherText)
+}
+
+# ── Unprotect-String ──────────────────────────────────────────────────────────
+Start-Suite "Unprotect-String"
+Test-ToolSchema "Unprotect-String"
+if (-not $SchemaOnly) {
+    # Encrypt then decrypt
+    $enc = Get-ToolOutput (Invoke-Tool "Protect-String" @{ Text = "round-trip test"; Password = "mypassword" })
+    $out = Invoke-Tool "Unprotect-String" @{ CipherText = $enc.CipherText; Password = "mypassword" }
+    Assert-ValidJson  "returns valid JSON"    $out
+    Assert-NoError    "no error"              $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has Text"   $obj "Text"
+    Assert-Equal      "decrypted correctly"  "round-trip test"  $obj.Text
+
+    # Wrong password returns error
+    $out2 = Invoke-Tool "Unprotect-String" @{ CipherText = $enc.CipherText; Password = "wrongpassword" }
+    Assert-ValidJson  "wrong password returns JSON"  $out2
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "wrong password has error"  ($null -ne $obj2.error)
+}
+
+# ── New-SecureToken ────────────────────────────────────────────────────────────
+Start-Suite "New-SecureToken"
+Test-ToolSchema "New-SecureToken"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "New-SecureToken"
+    Assert-ValidJson  "returns valid JSON"    $out
+    Assert-NoError    "no error"              $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has Token"    $obj "Token"
+    Assert-HasKey     "has Charset"  $obj "Charset"
+    Assert-Equal      "default length 32"  32  $obj.Length
+    Assert-True       "Hex token is hex chars"  ($obj.Token -match '^[0-9A-F]{32}$')
+
+    $out2 = Invoke-Tool "New-SecureToken" @{ Length = 16; Charset = "Alphanumeric" }
+    $obj2 = Get-ToolOutput $out2
+    Assert-Equal      "length 16"  16  $obj2.Length
+    Assert-True       "alphanumeric only"  ($obj2.Token -match '^[A-Za-z0-9]{16}$')
+
+    $out3 = Invoke-Tool "New-SecureToken" @{ Length = 24; Charset = "Base64" }
+    $obj3 = Get-ToolOutput $out3
+    Assert-Equal      "length 24"  24  $obj3.Length
+    Assert-True       "Base64 chars only"  ($obj3.Token -match '^[A-Za-z0-9]{24}$')
+}
+
+# ── Get-ServiceList ───────────────────────────────────────────────────────────
+Start-Suite "Get-ServiceList"
+Test-ToolSchema "Get-ServiceList"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "Get-ServiceList"
+    Assert-ValidJson  "returns valid JSON"   $out
+    Assert-NoError    "no error"             $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has ServiceCount"  $obj "ServiceCount"
+    Assert-HasKey     "has Services"      $obj "Services"
+    Assert-True       "ServiceCount >= 0"  ($obj.ServiceCount -ge 0)
+
+    # Filter that matches nothing
+    $out2 = Invoke-Tool "Get-ServiceList" @{ Name = "matrix-nonexistent-service-xyz*" }
+    Assert-ValidJson  "nonexistent filter returns JSON"  $out2
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "ServiceCount = 0 or no error"  ($obj2.ServiceCount -eq 0 -or $null -eq $obj2.error)
+}
+
+# ── Set-ServiceState ──────────────────────────────────────────────────────────
+Start-Suite "Set-ServiceState"
+Test-ToolSchema "Set-ServiceState"
+if (-not $SchemaOnly) {
+    # Only test error path — starting/stopping real services is too risky in CI
+    $out = Invoke-Tool "Set-ServiceState" @{ Name = "matrix-no-such-service-xyz"; Action = "Start" }
+    Assert-ValidJson  "invalid service returns JSON"  $out
+    $obj = Get-ToolOutput $out
+    Assert-True       "invalid service has error"  ($null -ne $obj.error)
+}
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 $failed = Show-TestSummary
 exit $failed
