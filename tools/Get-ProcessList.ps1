@@ -41,7 +41,7 @@ try {
         Filter      = if ($Name) { $Name } else { "*" }
         TotalShown  = @($results).Count
         Processes   = @($results)
-    } | ConvertTo-Json -Depth 5 -Compress
+    } | ConvertTo-Json -Depth 3 -Compress
 } catch {
     return @{ error = $_.Exception.Message } | ConvertTo-Json -Compress
 }

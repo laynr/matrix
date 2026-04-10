@@ -27,7 +27,7 @@ try {
         Expression = $Expression
         Result = $resultValue
     }
-    return $result | ConvertTo-Json -Depth 5 -Compress
+    return $result | ConvertTo-Json -Depth 3 -Compress
 } catch {
     return @{ error = "Failed to evaluate math expression: $($_.Exception.Message)" } | ConvertTo-Json -Compress
 }

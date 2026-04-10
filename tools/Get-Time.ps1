@@ -17,4 +17,4 @@ $result = @{
     UtcOffset = $timezone.BaseUtcOffset.ToString()
 }
 
-return $result | ConvertTo-Json -Depth 5 -Compress
+return $result | ConvertTo-Json -Depth 3 -Compress

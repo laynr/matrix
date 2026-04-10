@@ -64,7 +64,7 @@ try {
         ExitCode   = $proc.ExitCode
         Stdout     = $stdout.TrimEnd()
         Stderr     = $stderr.TrimEnd()
-    } | ConvertTo-Json -Depth 4 -Compress
+    } | ConvertTo-Json -Depth 3 -Compress
 } catch {
     return @{ error = $_.Exception.Message } | ConvertTo-Json -Compress
 }

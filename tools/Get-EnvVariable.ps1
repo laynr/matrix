@@ -32,7 +32,7 @@ try {
         Filter = $Filter
         Count  = @($all).Count
         Variables = @($all)
-    } | ConvertTo-Json -Depth 4 -Compress
+    } | ConvertTo-Json -Depth 3 -Compress
 } catch {
     return @{ error = $_.Exception.Message } | ConvertTo-Json -Compress
 }

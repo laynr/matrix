@@ -45,7 +45,7 @@ try {
 
     # ── Render output ─────────────────────────────────────────────────────────
     $result = switch ($To) {
-        "json"  { $objects | ConvertTo-Json -Depth 10 -Compress }
+        "json"  { $objects | ConvertTo-Json -Depth 5 -Compress }  # 5 to preserve nested user data
         "csv"   { $objects | ConvertTo-Csv -NoTypeInformation }
         "list"  {
             $props = ($objects | Select-Object -First 1).PSObject.Properties.Name
@@ -65,7 +65,7 @@ try {
         To     = $To
         Count  = @($objects).Count
         Output = $result
-    } | ConvertTo-Json -Depth 4 -Compress
+    } | ConvertTo-Json -Depth 3 -Compress
 } catch {
     return @{ error = $_.Exception.Message } | ConvertTo-Json -Compress
 }

@@ -19,7 +19,7 @@ try {
     $encodedTopic = [uri]::EscapeDataString($Topic)
     $url = "https://en.wikipedia.org/api/rest_v1/page/summary/$encodedTopic"
     
-    $response = Invoke-RestMethod -Uri $url -Method Get -ErrorAction Stop
+    $response = Invoke-RestMethod -Uri $url -Method Get -TimeoutSec 15 -ErrorAction Stop
     
     $result = @{
         Title = $response.title
@@ -28,7 +28,7 @@ try {
         Url = $response.content_urls.desktop.page
     }
     
-    return $result | ConvertTo-Json -Depth 5 -Compress
+    return $result | ConvertTo-Json -Depth 3 -Compress
 } catch {
     return @{ error = "Could not find a Wikipedia summary for '$Topic'. It may not exist or require different casing." } | ConvertTo-Json -Compress
 }

@@ -19,7 +19,7 @@ try {
     $encodedCity = [uri]::EscapeDataString($City)
     $url = "https://wttr.in/${encodedCity}?format=j1"
     
-    $response = Invoke-RestMethod -Uri $url -Method Get -ErrorAction Stop
+    $response = Invoke-RestMethod -Uri $url -Method Get -TimeoutSec 15 -ErrorAction Stop
     $current = $response.current_condition[0]
     $area = $response.nearest_area[0]
 
@@ -33,7 +33,7 @@ try {
         ObservationTime = $current.observation_time
     }
 
-    return $result | ConvertTo-Json -Depth 5 -Compress
+    return $result | ConvertTo-Json -Depth 3 -Compress
 } catch {
     return @{ error = "Failed to fetch weather for '$City': $($_.Exception.Message)" } | ConvertTo-Json -Compress
 }

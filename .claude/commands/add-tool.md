@@ -59,6 +59,21 @@ try {
 - `-Depth 3 -Compress` on all `ConvertTo-Json`
 - Return `@{ error = "..." }` on bad input — do not throw
 
+**Cross-platform + native PowerShell rules (mandatory):**
+- **Native PowerShell only** — tool logic must use only PowerShell cmdlets and .NET BCL
+  types. Never shell out to `python`, `node`, `ruby`, `pip`, `npm`, `brew`, `apt`,
+  `yum`, `dotnet` CLI, or any tool that is not guaranteed to be installed on a stock
+  Windows / macOS / Linux machine with only PowerShell 7 present.
+- **Must run on all three platforms** — Windows, macOS, AND Linux with no external
+  dependencies. Test mentally: "does this run on a fresh VM with only pwsh installed?"
+- **OS-specific paths are allowed when guarded** — if you must call a platform-native
+  utility (e.g. `sysctl` on macOS, `/proc/meminfo` on Linux, `Get-CimInstance` on
+  Windows), wrap it in `if ($IsWindows)` / `elseif ($IsMacOS)` / `elseif ($IsLinux)`
+  blocks and provide a fallback or graceful skip for other platforms.
+- **Never hardcode path separators** — always use `Join-Path`, never `"C:\foo\bar"` or
+  `"/usr/local/bin"` as a literal. Use `$HOME` or `$env:USERPROFILE` only with a
+  cross-platform fallback: `$env:HOME ?? $env:USERPROFILE`.
+
 **Security checklist:**
 - [ ] Validate path args with `Test-Path` or resolve to prevent traversal
 - [ ] Never `Invoke-Expression` on user input — use `& $exe @args` array form

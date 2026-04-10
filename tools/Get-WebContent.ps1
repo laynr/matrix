@@ -45,7 +45,7 @@ try {
         Url        = $Url
         StatusCode = $response.StatusCode
         Content    = $body
-    } | ConvertTo-Json -Depth 4 -Compress
+    } | ConvertTo-Json -Depth 3 -Compress
 } catch {
     return @{ error = "Failed to fetch '$Url': $($_.Exception.Message)" } | ConvertTo-Json -Compress
 }

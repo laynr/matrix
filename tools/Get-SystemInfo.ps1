@@ -74,4 +74,4 @@ try {
     $result.CPUError = $_.Exception.Message
 }
 
-return $result | ConvertTo-Json -Depth 5 -Compress
+return $result | ConvertTo-Json -Depth 3 -Compress

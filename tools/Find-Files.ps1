@@ -64,7 +64,7 @@ try {
             ContentPattern = $ContentPattern
             ResultCount    = @($matches).Count
             Results        = @($matches)
-        } | ConvertTo-Json -Depth 6 -Compress
+        } | ConvertTo-Json -Depth 3 -Compress
     }
 
     $results = $files | Select-Object -First $MaxResults | ForEach-Object {
@@ -80,7 +80,7 @@ try {
         NamePattern = $NamePattern
         ResultCount = @($results).Count
         Results     = @($results)
-    } | ConvertTo-Json -Depth 6 -Compress
+    } | ConvertTo-Json -Depth 3 -Compress
 } catch {
     return @{ error = $_.Exception.Message } | ConvertTo-Json -Compress
 }

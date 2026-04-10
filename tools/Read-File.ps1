@@ -46,7 +46,7 @@ try {
         TotalLines = $total
         ReturnedLines = "$($from + 1)-$($to + 1)"
         Content   = $content
-    } | ConvertTo-Json -Depth 5 -Compress
+    } | ConvertTo-Json -Depth 3 -Compress
 } catch {
     return @{ error = $_.Exception.Message } | ConvertTo-Json -Compress
 }
