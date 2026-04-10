@@ -115,28 +115,36 @@ try {
     Add-Result -Test "Smoke test" -Passed $false -Detail "$_"
 }
 
-# ── Uninstall ─────────────────────────────────────────────────────────────────
+# ── Uninstall — runs the real uninstall.pwsh.ps1 ─────────────────────────────
 Start-Suite "Uninstall [$platform]"
 
-$uninstallOk = $true
+# Point the uninstaller at the test directories via env vars (same vars as the installer)
+$env:MATRIX_HOME    = $testHome
+$env:MATRIX_BIN_DIR = $testBin
+
+$uninstallerPath = Join-Path $sourceRoot "uninstall.pwsh.ps1"
+
 try {
-    Remove-Item $testHome -Recurse -Force -ErrorAction Stop
+    Assert-True "uninstall.pwsh.ps1 exists" (Test-Path $uninstallerPath)
+
+    $output = pwsh -NoProfile -ExecutionPolicy Bypass -File $uninstallerPath -Quiet 2>&1
+    $exitCode = $LASTEXITCODE
+    Assert-True "uninstaller exits cleanly" ($exitCode -eq 0)
 } catch {
-    Add-Result -Test "Remove install dir" -Passed $false -Detail "$_"
-    $uninstallOk = $false
-}
-try {
-    Remove-Item $testBin -Recurse -Force -ErrorAction Stop
-} catch {
-    Add-Result -Test "Remove bin dir" -Passed $false -Detail "$_"
-    $uninstallOk = $false
+    Add-Result -Test "Uninstaller ran without exception" -Passed $false -Detail "$_"
+} finally {
+    # Always clear test env vars so they don't leak into subsequent test suites
+    Remove-Item Env:MATRIX_HOME    -ErrorAction SilentlyContinue
+    Remove-Item Env:MATRIX_BIN_DIR -ErrorAction SilentlyContinue
 }
 
-if ($uninstallOk) {
-    Assert-True "install dir gone"  (-not (Test-Path $testHome))
-    Assert-True "bin dir gone"      (-not (Test-Path $testBin))
-    Assert-True "launcher gone"     (-not (Test-Path $script:launcher))
-}
+Assert-True "install dir gone"  (-not (Test-Path $testHome))
+Assert-True "launcher gone"     (-not (Test-Path $script:launcher))
+
+# The bin directory itself is a system path and is intentionally left in place
+# by the uninstaller. Clean it up here since it was a temp dir created for this test.
+Remove-Item $testBin -Recurse -Force -ErrorAction SilentlyContinue
+Assert-True "bin dir gone"      (-not (Test-Path $testBin))
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 $failed = Show-TestSummary
