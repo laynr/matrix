@@ -277,6 +277,77 @@ Assert-True  "Network.ps1 does not call PostAsync with HttpCompletionOption" `
 Assert-True  "Network.ps1 uses SendAsync for streaming" `
     ($networkSrc -match 'SendAsync\s*\(')
 
+# ── Tool selection — relevance scoring ───────────────────────────────────────
+
+Start-Suite "Tool selection — relevance scoring"
+
+$null = Get-MatrixTools   # ensure cache is warm
+
+# Weather query → Get-Weather should score highest
+$weatherSel = Select-MatrixTools -UserMessage "What is the weather like in London today?" -MaxCount 5
+Assert-True "weather query selects Get-Weather" `
+    ($null -ne ($weatherSel | Where-Object { $_.function.name -eq "Get-Weather" }))
+
+# File reading → Read-File should score highest
+$fileSel = Select-MatrixTools -UserMessage "Read the contents of /tmp/notes.txt for me" -MaxCount 5
+Assert-True "file query selects Read-File" `
+    ($null -ne ($fileSel | Where-Object { $_.function.name -eq "Read-File" }))
+
+# Math query → Invoke-Math should be included
+$mathSel = Select-MatrixTools -UserMessage "Calculate 42 * 7 math expression" -MaxCount 5
+Assert-True "math query selects Invoke-Math" `
+    ($null -ne ($mathSel | Where-Object { $_.function.name -eq "Invoke-Math" }))
+
+# MaxCount cap is respected
+$cappedSel = Select-MatrixTools -UserMessage "tell me anything" -MaxCount 3 -MaxTokenBudget 999999
+Assert-True "MaxCount=3 returns at most 3 tools" ($cappedSel.Count -le 3)
+
+# Token budget enforced — budget of 1 token = 3 chars, no full schema fits
+$budgetSel = Select-MatrixTools -UserMessage "anything" -MaxTokenBudget 1 -MaxCount 999
+Assert-True "MaxTokenBudget=1 returns 0 tools (no schema fits)" ($budgetSel.Count -eq 0)
+
+# CoreTools always included even when message has no relevant keywords
+$coreSel = Select-MatrixTools -UserMessage "xyzzy plugh nothing matches" -MaxCount 5 -CoreTools @("Get-Time")
+Assert-True "CoreTools always included regardless of query" `
+    ($null -ne ($coreSel | Where-Object { $_.function.name -eq "Get-Time" }))
+
+# Empty message — no crash, still returns tools up to cap
+$emptySel = Select-MatrixTools -UserMessage "" -MaxCount 5
+Assert-True "empty message returns up to MaxCount tools" ($emptySel.Count -gt 0 -and $emptySel.Count -le 5)
+
+# Empty cache — returns empty array, no crash
+Reset-ToolCache
+$cachelessSel = Select-MatrixTools -UserMessage "weather file math"
+Assert-True "empty cache returns empty array" ($cachelessSel.Count -eq 0)
+$null = Get-MatrixTools   # restore cache for subsequent suites
+
+# ── Tool catalog ──────────────────────────────────────────────────────────────
+
+Start-Suite "Tool catalog"
+
+$null = Get-MatrixTools
+
+$catalog = Get-MatrixToolCatalog
+Assert-True "catalog is non-empty string" (-not [string]::IsNullOrWhiteSpace($catalog))
+
+$catalogLines = $catalog -split "`n"
+$allTools     = Get-MatrixTools
+Assert-Equal "catalog has one line per tool" $allTools.Count $catalogLines.Count
+
+# Every tool name must appear in the catalog
+foreach ($t in $allTools) {
+    Assert-True "[$($t.function.name)] appears in catalog" ($catalog -match [regex]::Escape($t.function.name))
+}
+
+# Lines should be in "Name: description" format
+Assert-True "catalog lines use 'Name: description' format" ($catalogLines[0] -match '^\S+: .+')
+
+# Empty cache → empty catalog, no crash
+Reset-ToolCache
+$emptyCatalog = Get-MatrixToolCatalog
+Assert-True "empty cache returns empty catalog" ([string]::IsNullOrWhiteSpace($emptyCatalog))
+$null = Get-MatrixTools   # restore
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 $failed = Show-TestSummary
 exit $failed
