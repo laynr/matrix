@@ -4,6 +4,9 @@ Gets the current real-time weather forecast for a specified city using wttr.in.
 
 .DESCRIPTION
 This tool fetches real-time weather information from the internet. Use this when the user asks for the weather in a specific location. Do not use this tool if the user is not explicitly asking about the weather.
+
+.PARAMETER City
+The city name to fetch weather for (e.g. "London", "New York", "Tokyo").
 #>
 [CmdletBinding()]
 param(

@@ -97,9 +97,9 @@ Assert-True       "Content is string" ($obj.Content -is [string])
 
 $out2 = Invoke-Tool "Read-File" @{ Path = $tmpFile; StartLine = 2; EndLine = 3 }
 $obj2 = Get-ToolOutput $out2
-Assert-Equal      "Range returns 2 lines"  2  $obj2.ReturnedLines
+Assert-Equal      "Range returns lines 2-3"  "2-3"  $obj2.ReturnedLines
 
-$out3 = Invoke-Tool "Read-File" @{ Path = "C:\does\not\exist\file.txt" }
+$out3 = Invoke-Tool "Read-File" @{ Path = (Join-Path ([IO.Path]::GetTempPath()) "matrix-no-such-file-xyzabc.txt") }
 Assert-ValidJson  "missing file returns JSON"  $out3
 $obj3 = Get-ToolOutput $out3
 Assert-True       "missing file has error field"  ($null -ne $obj3.error)
@@ -282,7 +282,7 @@ Assert-ValidJson  "returns valid JSON"    $out
 Assert-NoError    "no error JSON→CSV"     $out
 $obj = Get-ToolOutput $out
 Assert-Equal      "Count = 2"  2  $obj.Count
-Assert-True       "Output contains Alice" ($obj.Output -match "Alice")
+Assert-True       "Output contains Alice" ([bool]($obj.Output -match "Alice"))
 
 $out2 = Invoke-Tool "Convert-DataFormat" @{
     Data = "Alice`nBob`nCharlie"

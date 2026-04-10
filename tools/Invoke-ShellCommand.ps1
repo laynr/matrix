@@ -21,14 +21,19 @@ param(
 )
 
 try {
-    # Split command into executable + arguments
-    $parts = $Command.Trim() -split '\s+', 2
-    $exe   = $parts[0]
-    $args  = if ($parts.Count -gt 1) { $parts[1] } else { "" }
-
+    # Route through the platform shell so quoted arguments and shell syntax work correctly.
+    # Using ArgumentList (not Arguments string) passes the command as a single atomic argument,
+    # avoiding the naive whitespace-split that breaks paths or args containing spaces.
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
-    $psi.FileName               = $exe
-    $psi.Arguments              = $args
+    if ($IsWindows) {
+        $psi.FileName = "cmd.exe"
+        $psi.ArgumentList.Add("/c")
+        $psi.ArgumentList.Add($Command)
+    } else {
+        $psi.FileName = "/bin/sh"
+        $psi.ArgumentList.Add("-c")
+        $psi.ArgumentList.Add($Command)
+    }
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError  = $true
     $psi.UseShellExecute        = $false
@@ -41,14 +46,18 @@ try {
     }
 
     $proc = [System.Diagnostics.Process]::Start($psi)
-    $stdout = $proc.StandardOutput.ReadToEnd()
-    $stderr = $proc.StandardError.ReadToEnd()
+    # Read streams asynchronously to prevent deadlock when buffer fills
+    $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+    $stderrTask = $proc.StandardError.ReadToEndAsync()
     $exited = $proc.WaitForExit($TimeoutSeconds * 1000)
 
     if (-not $exited) {
-        $proc.Kill()
+        try { $proc.Kill() } catch {}
         return @{ error = "Command timed out after $TimeoutSeconds seconds." } | ConvertTo-Json -Compress
     }
+
+    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    $stderr = $stderrTask.GetAwaiter().GetResult()
 
     return @{
         Command    = $Command

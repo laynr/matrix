@@ -106,14 +106,14 @@ function Assert-ValidJson {
 function Invoke-Tool {
     param(
         [string]$ToolName,
-        [hashtable]$Args = @{}
+        [hashtable]$ToolArgs = @{}
     )
     $toolPath = Join-Path $PSScriptRoot ".." "tools" "$ToolName.ps1"
     if (-not (Test-Path $toolPath)) {
         throw "Tool not found: $toolPath"
     }
-    if ($Args.Count -gt 0) {
-        return & $toolPath @Args
+    if ($ToolArgs.Count -gt 0) {
+        return & $toolPath @ToolArgs
     } else {
         return & $toolPath
     }
@@ -165,7 +165,7 @@ function Test-ToolSchema {
                 }
                 if ($hasMandatory -and $help -and $help.Parameters) {
                     Assert-True "$ToolName.$pName has .PARAMETER doc" `
-                        ($null -ne $help.Parameters[$pName])
+                        ($null -ne $help.Parameters[$pName.ToUpper()])
                 }
             }
         }
