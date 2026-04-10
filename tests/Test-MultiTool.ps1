@@ -246,6 +246,37 @@ $short = Get-DynamicNumCtx -Messages $msgs     -Tools $realTools
 $long  = Get-DynamicNumCtx -Messages $longMsgs -Tools $realTools
 Assert-True  "longer conversation → larger num_ctx"  ($long -gt $short)
 
+# ── HttpClient overload sanity ────────────────────────────────────────────────
+# Guards against the bug where PostAsync was called with HttpCompletionOption
+# (which doesn't exist) instead of SendAsync (which does). This crashed at
+# runtime but was invisible to schema-only tests.
+
+Start-Suite "HttpClient streaming overload"
+
+# PostAsync has NO overload accepting HttpCompletionOption — confirm .NET agrees
+$postAsyncBadOverload = [System.Net.Http.HttpClient].GetMethods() | Where-Object {
+    $_.Name -eq 'PostAsync' -and
+    ($_.GetParameters() | Where-Object { $_.ParameterType -eq [System.Net.Http.HttpCompletionOption] })
+}
+Assert-True  "PostAsync has no HttpCompletionOption overload" ($null -eq $postAsyncBadOverload)
+
+# SendAsync DOES have a 2-param overload (HttpRequestMessage, HttpCompletionOption)
+$sendAsyncGoodOverload = [System.Net.Http.HttpClient].GetMethods() | Where-Object {
+    $_.Name -eq 'SendAsync' -and
+    $_.GetParameters().Count -ge 2 -and
+    $_.GetParameters()[1].ParameterType -eq [System.Net.Http.HttpCompletionOption]
+}
+Assert-True  "SendAsync(msg, HttpCompletionOption) overload exists" ($null -ne $sendAsyncGoodOverload)
+
+# Static check: Network.ps1 must not call PostAsync with HttpCompletionOption
+$networkSrc = Get-Content (Join-Path $global:MatrixRoot "lib" "Network.ps1") -Raw
+Assert-True  "Network.ps1 does not call PostAsync with HttpCompletionOption" `
+    ($networkSrc -notmatch 'PostAsync\s*\([^)]*HttpCompletionOption')
+
+# Static check: Network.ps1 must use SendAsync for streaming
+Assert-True  "Network.ps1 uses SendAsync for streaming" `
+    ($networkSrc -match 'SendAsync\s*\(')
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 $failed = Show-TestSummary
 exit $failed

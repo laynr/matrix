@@ -159,8 +159,12 @@ function Invoke-MatrixStreamingChat {
             # ResponseHeadersRead: returns as soon as headers arrive so the body
             # streams live. The default (ResponseContentRead) buffers everything
             # first, making "streaming" appear as a single delayed dump.
-            $httpResp   = $client.PostAsync(
-                $Config.Endpoint, $reqContent,
+            # PostAsync has no HttpCompletionOption overload — use SendAsync.
+            $req        = [System.Net.Http.HttpRequestMessage]::new(
+                [System.Net.Http.HttpMethod]::Post, $Config.Endpoint)
+            $req.Content = $reqContent
+            $httpResp   = $client.SendAsync(
+                $req,
                 [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead
             ).GetAwaiter().GetResult()
             $httpResp.EnsureSuccessStatusCode() | Out-Null
