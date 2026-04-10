@@ -2,6 +2,7 @@
 
 $script:MaxToolResultChars = 8000
 $script:HttpClient         = $null
+$script:ToolRunspacePool   = $null
 
 function Get-MatrixHttpClient {
     if (-not $script:HttpClient) {
@@ -9,6 +10,18 @@ function Get-MatrixHttpClient {
         $script:HttpClient.Timeout = [TimeSpan]::FromSeconds(120)
     }
     return $script:HttpClient
+}
+
+# Returns a warm RunspacePool shared across all tool dispatches.
+# Pre-allocating avoids the overhead of creating a fresh runspace per tool call.
+function Get-MatrixRunspacePool {
+    if (-not $script:ToolRunspacePool -or
+        $script:ToolRunspacePool.RunspacePoolStateInfo.State -ne 'Opened') {
+        $pool = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool(1, 8)
+        $pool.Open()
+        $script:ToolRunspacePool = $pool
+    }
+    return $script:ToolRunspacePool
 }
 
 # Computes num_ctx from actual message payload + tool schemas so the KV cache
@@ -256,7 +269,9 @@ function Invoke-MatrixToolchain {
         }
     }
 
-    # Parse arguments and launch all tools concurrently
+    # Parse arguments and launch all tools concurrently via a shared RunspacePool.
+    # Pool is kept warm across calls — avoids the overhead of creating a fresh runspace per tool.
+    $pool         = Get-MatrixRunspacePool
     $runspaceList = [System.Collections.Generic.List[hashtable]]::new()
 
     foreach ($tc in $toolsCalled) {
@@ -289,6 +304,7 @@ function Invoke-MatrixToolchain {
         Write-MatrixLog -Message "Dispatching tool: $name  args: $($argsHash | ConvertTo-Json -Compress)"
 
         $ps = [PowerShell]::Create()
+        $ps.RunspacePool = $pool
         [void]$ps.AddScript({
             param($root, $toolName, $inputArgs)
             $global:MatrixRoot = $root
