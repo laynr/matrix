@@ -130,7 +130,7 @@ function Invoke-MatrixTool {
     $toolPath = Join-Path $global:MatrixRoot "tools" "$ToolName.ps1"
     if (-not (Test-Path $toolPath)) {
         Write-MatrixLog -Level "WARN" -Message "Tool not found: $toolPath"
-        return "Error: tool '$ToolName' not found."
+        return @{ error = "tool '$ToolName' not found" } | ConvertTo-Json -Compress
     }
 
     try {
@@ -148,6 +148,6 @@ function Invoke-MatrixTool {
         return [string]$output
     } catch {
         Write-MatrixLog -Level "ERROR" -Message "Tool error ($ToolName): $_"
-        return "Error executing '$ToolName': $_"
+        return @{ error = "Error executing '$ToolName': $_" } | ConvertTo-Json -Compress
     }
 }
