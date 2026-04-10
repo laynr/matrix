@@ -572,6 +572,141 @@ if (-not $SchemaOnly) {
     Assert-True       "missing path has error"  ($null -ne $obj3.error)
 }
 
+# ── Write-DocxFile ────────────────────────────────────────────────────────────
+Start-Suite "Write-DocxFile"
+Test-ToolSchema "Write-DocxFile"
+if (-not $SchemaOnly) {
+    $docPath = Join-Path ([IO.Path]::GetTempPath()) "matrix-test-$PID.docx"
+
+    $out = Invoke-Tool "Write-DocxFile" @{
+        Path       = $docPath
+        Paragraphs = @("Hello World", "Second paragraph", "Third paragraph")
+        Overwrite  = $true
+    }
+    Assert-ValidJson  "returns valid JSON"   $out
+    Assert-NoError    "no error"             $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has ParagraphCount"  $obj "ParagraphCount"
+    Assert-HasKey     "has SizeBytes"       $obj "SizeBytes"
+    Assert-True       "file exists"         (Test-Path $docPath)
+    Assert-True       "SizeBytes > 0"       ($obj.SizeBytes -gt 0)
+    Assert-True       "ParagraphCount = 3"  ($obj.ParagraphCount -eq 3)
+
+    # Overwrite guard
+    $out2 = Invoke-Tool "Write-DocxFile" @{ Path = $docPath; Paragraphs = @("x"); Overwrite = $false }
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "overwrite guard returns error"  ($null -ne $obj2.error)
+
+    # keep $docPath for Read-DocxFile round-trip
+}
+
+# ── Read-DocxFile ─────────────────────────────────────────────────────────────
+Start-Suite "Read-DocxFile"
+Test-ToolSchema "Read-DocxFile"
+if (-not $SchemaOnly) {
+    $docPath = Join-Path ([IO.Path]::GetTempPath()) "matrix-test-$PID.docx"
+
+    # Ensure the file exists (create if Write-DocxFile test didn't run or cleaned up)
+    if (-not (Test-Path $docPath)) {
+        Invoke-Tool "Write-DocxFile" @{
+            Path       = $docPath
+            Paragraphs = @("Hello World", "Second paragraph", "Third paragraph")
+            Overwrite  = $true
+        } | Out-Null
+    }
+
+    $out = Invoke-Tool "Read-DocxFile" @{ Path = $docPath }
+    Assert-ValidJson  "returns valid JSON"    $out
+    Assert-NoError    "no error"              $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has ParagraphCount"   $obj "ParagraphCount"
+    Assert-HasKey     "has Text"             $obj "Text"
+    Assert-HasKey     "has Paragraphs"       $obj "Paragraphs"
+    Assert-True       "ParagraphCount = 3"   ($obj.ParagraphCount -eq 3)
+    Assert-True       "Text non-empty"       (-not [string]::IsNullOrWhiteSpace($obj.Text))
+
+    $out2 = Invoke-Tool "Read-DocxFile" @{ Path = (Join-Path ([IO.Path]::GetTempPath()) "no-file-xyz.docx") }
+    Assert-ValidJson  "missing file returns JSON"  $out2
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "missing file has error"  ($null -ne $obj2.error)
+
+    Remove-Item $docPath -Force -EA SilentlyContinue
+}
+
+# ── Write-XlsxFile ────────────────────────────────────────────────────────────
+Start-Suite "Write-XlsxFile"
+Test-ToolSchema "Write-XlsxFile"
+if (-not $SchemaOnly) {
+    $xlsxPath = Join-Path ([IO.Path]::GetTempPath()) "matrix-test-$PID.xlsx"
+    $testData = @(
+        @{ Name = "Alice"; Age = 30; City = "London" }
+        @{ Name = "Bob";   Age = 25; City = "Paris"  }
+        @{ Name = "Carol"; Age = 35; City = "Berlin" }
+    )
+
+    $out = Invoke-Tool "Write-XlsxFile" @{
+        Path      = $xlsxPath
+        Data      = $testData
+        SheetName = "People"
+        Overwrite = $true
+    }
+    Assert-ValidJson  "returns valid JSON"   $out
+    Assert-NoError    "no error"             $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has RowCount"      $obj "RowCount"
+    Assert-HasKey     "has ColumnCount"   $obj "ColumnCount"
+    Assert-HasKey     "has SizeBytes"     $obj "SizeBytes"
+    Assert-Equal      "RowCount = 3"    3  $obj.RowCount
+    Assert-Equal      "ColumnCount = 3" 3  $obj.ColumnCount
+    Assert-True       "file exists"        (Test-Path $xlsxPath)
+    Assert-True       "SizeBytes > 0"     ($obj.SizeBytes -gt 0)
+
+    # Overwrite guard
+    $out2 = Invoke-Tool "Write-XlsxFile" @{ Path = $xlsxPath; Data = $testData; Overwrite = $false }
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "overwrite guard returns error"  ($null -ne $obj2.error)
+
+    # keep $xlsxPath for Read-XlsxFile round-trip
+}
+
+# ── Read-XlsxFile ─────────────────────────────────────────────────────────────
+Start-Suite "Read-XlsxFile"
+Test-ToolSchema "Read-XlsxFile"
+if (-not $SchemaOnly) {
+    $xlsxPath = Join-Path ([IO.Path]::GetTempPath()) "matrix-test-$PID.xlsx"
+    $testData = @(
+        @{ Name = "Alice"; Age = 30; City = "London" }
+        @{ Name = "Bob";   Age = 25; City = "Paris"  }
+        @{ Name = "Carol"; Age = 35; City = "Berlin" }
+    )
+
+    if (-not (Test-Path $xlsxPath)) {
+        Invoke-Tool "Write-XlsxFile" @{
+            Path      = $xlsxPath
+            Data      = $testData
+            SheetName = "People"
+            Overwrite = $true
+        } | Out-Null
+    }
+
+    $out = Invoke-Tool "Read-XlsxFile" @{ Path = $xlsxPath }
+    Assert-ValidJson  "returns valid JSON"   $out
+    Assert-NoError    "no error"             $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has SheetName"    $obj "SheetName"
+    Assert-HasKey     "has RowCount"     $obj "RowCount"
+    Assert-HasKey     "has Rows"         $obj "Rows"
+    # Header row + 3 data rows = 4 total rows
+    Assert-Equal      "RowCount = 4"   4  $obj.RowCount
+
+    $out2 = Invoke-Tool "Read-XlsxFile" @{ Path = (Join-Path ([IO.Path]::GetTempPath()) "no-file-xyz.xlsx") }
+    Assert-ValidJson  "missing file returns JSON"  $out2
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "missing file has error"  ($null -ne $obj2.error)
+
+    Remove-Item $xlsxPath -Force -EA SilentlyContinue
+}
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 $failed = Show-TestSummary
 exit $failed
