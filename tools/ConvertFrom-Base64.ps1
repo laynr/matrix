@@ -32,7 +32,14 @@ try {
         } | ConvertTo-Json -Depth 3 -Compress
     }
 
-    $enc  = [System.Text.Encoding]::GetEncoding($Encoding)
+    $enc = switch ($Encoding.ToUpper()) {
+        "UTF8"    { [System.Text.Encoding]::UTF8    }
+        "ASCII"   { [System.Text.Encoding]::ASCII   }
+        "UNICODE" { [System.Text.Encoding]::Unicode }
+        "UTF16"   { [System.Text.Encoding]::Unicode }
+        "UTF32"   { [System.Text.Encoding]::UTF32   }
+        default   { [System.Text.Encoding]::GetEncoding($Encoding) }
+    }
     $text = $enc.GetString($bytes)
 
     return @{
