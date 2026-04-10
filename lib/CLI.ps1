@@ -64,7 +64,8 @@ function Show-MatrixCLI {
         } catch {}
     }
 
-    $tools  = Get-MatrixTools
+    $allTools = Get-MatrixTools          # populate schema cache; used for display count
+    $null     = Get-MatrixRunspacePool   # pre-warm runspaces — eliminates first-call delay
     $max    = if ($global:Config.MaxTokens)   { $global:Config.MaxTokens }   else { 100000 }
     $sumAt  = if ($global:Config.SummarizeAt) { $global:Config.SummarizeAt } else { 75000 }
     $ep     = $global:Config.Endpoint
@@ -78,7 +79,8 @@ function Show-MatrixCLI {
     Write-Host "   Model    : $($global:Config.Model)"
     Write-Host "   Endpoint : $ep"
     Write-Host "   Context  : $max max tokens · summarize at $sumAt" -ForegroundColor DarkGray
-    Write-Host "   Tools    : $($tools.Count) loaded"
+    $maxCount = if ($global:Config.MaxToolCount) { $global:Config.MaxToolCount } else { 25 }
+    Write-Host "   Tools    : $($allTools.Count) available · up to $maxCount schemas/request"
     if ($versionStr) { Write-Host "   Version  : $versionStr" -ForegroundColor DarkGray }
     Write-Host "  $sep" -ForegroundColor DarkCyan
     Write-Host "   Type 'help' for commands · 'exit' to quit" -ForegroundColor DarkGray
@@ -92,6 +94,8 @@ function Show-MatrixCLI {
         Write-Host ""
     }
 
+    # $allTools is used for display/count. Per-message selection happens inside the loop.
+
     while ($true) {
         Show-ContextStatus
         Write-Host ""
@@ -103,8 +107,8 @@ function Show-MatrixCLI {
             "quit"   { return }
             "reload" {
                 Reset-ToolCache
-                $tools = Get-MatrixTools
-                Write-Host "  Tools reloaded: $($tools.Count) ($( ($tools | ForEach-Object { $_.function.name }) -join ', '))" -ForegroundColor Cyan
+                $allTools = Get-MatrixTools
+                Write-Host "  Tools reloaded: $($allTools.Count) ($( ($allTools | ForEach-Object { $_.function.name }) -join ', '))" -ForegroundColor Cyan
                 if ($script:ToolDiscoveryErrors -and $script:ToolDiscoveryErrors.Count -gt 0) {
                     foreach ($e in $script:ToolDiscoveryErrors) {
                         Write-Host "  [warn] '$($e.Name)' failed to load: $($e.Error)" -ForegroundColor Yellow
@@ -127,10 +131,18 @@ function Show-MatrixCLI {
             }
         }
 
+        # Select relevant schemas for this message; catalog tells LLM about all tools
+        $tools   = Select-MatrixTools `
+                       -UserMessage    $inputMsg `
+                       -MaxTokenBudget ($global:Config.ToolBudgetTokens ?? 6000) `
+                       -MaxCount       ($global:Config.MaxToolCount ?? 25) `
+                       -CoreTools      ($global:Config.CoreTools ?? @())
+        $catalog = Get-MatrixToolCatalog
+
         Add-Message -Role "user" -Content $inputMsg
 
         try {
-            Process-OllamaMessage -Tools $tools
+            Process-OllamaMessage -Tools $tools -ToolCatalog $catalog
             Prune-Context
         } catch {
             Show-MatrixError $_
@@ -142,8 +154,9 @@ function Show-MatrixCLI {
 # follow-up responses until the model stops calling tools.
 function Process-OllamaMessage {
     param(
-        [array]$Tools,
-        [int]$Depth = 0
+        [array] $Tools,
+        [string]$ToolCatalog = "",
+        [int]   $Depth = 0
     )
 
     $maxDepth = if ($global:Config.MaxDepth) { $global:Config.MaxDepth } else { 10 }
@@ -157,7 +170,7 @@ function Process-OllamaMessage {
     Write-Host ("  " + "─" * 50) -ForegroundColor DarkGray
     Write-Host ""
     Write-Host -NoNewline "  Matrix ▸ " -ForegroundColor Cyan
-    $response = Invoke-MatrixStreamingChat -Config $global:Config -Messages (Get-Messages) -Tools $Tools
+    $response = Invoke-MatrixStreamingChat -Config $global:Config -Messages (Get-Messages) -Tools $Tools -ToolCatalog $ToolCatalog
     Write-Host ""  # newline after last streamed token
 
     if ($response.error) {
@@ -176,6 +189,6 @@ function Process-OllamaMessage {
             Add-Message -Role $tr.role -Content $tr.content
         }
         # Follow-up: model synthesizes tool results into a final answer
-        Process-OllamaMessage -Tools $Tools -Depth ($Depth + 1)
+        Process-OllamaMessage -Tools $Tools -ToolCatalog $ToolCatalog -Depth ($Depth + 1)
     }
 }

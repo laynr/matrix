@@ -76,12 +76,17 @@ function Limit-ToolResult {
 function Invoke-MatrixChat {
     param(
         [hashtable]$Config,
-        [array]$Messages,
-        [array]$Tools
+        [array]    $Messages,
+        [array]    $Tools,
+        [string]   $ToolCatalog = ""
     )
 
-    $messagesWithSystem = if ($Config.SystemPrompt) {
-        @(@{ role = "system"; content = $Config.SystemPrompt }) + $Messages
+    $systemContent = $Config.SystemPrompt
+    if ($ToolCatalog) {
+        $systemContent += "`n`nAll available tools (use tool call format for any of these):`n$ToolCatalog"
+    }
+    $messagesWithSystem = if ($systemContent) {
+        @(@{ role = "system"; content = $systemContent }) + $Messages
     } else { $Messages }
 
     $numCtx = Get-DynamicNumCtx -Messages $messagesWithSystem -Tools $Tools -Override ([int]$Config.NumCtx)
@@ -136,13 +141,20 @@ function Invoke-MatrixChat {
 function Invoke-MatrixStreamingChat {
     param(
         [hashtable]$Config,
-        [array]$Messages,
-        [array]$Tools
+        [array]    $Messages,
+        [array]    $Tools,
+        [string]   $ToolCatalog = ""
     )
 
-    # System prompt prepended on every call — never stored in history
-    $messagesWithSystem = if ($Config.SystemPrompt) {
-        @(@{ role = "system"; content = $Config.SystemPrompt }) + $Messages
+    # System prompt prepended on every call — never stored in history.
+    # Catalog appended so the LLM knows all available tools even when only
+    # a relevant subset of full schemas is injected into tools[].
+    $systemContent = $Config.SystemPrompt
+    if ($ToolCatalog) {
+        $systemContent += "`n`nAll available tools (use tool call format for any of these):`n$ToolCatalog"
+    }
+    $messagesWithSystem = if ($systemContent) {
+        @(@{ role = "system"; content = $systemContent }) + $Messages
     } else {
         $Messages
     }

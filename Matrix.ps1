@@ -116,7 +116,12 @@ if ($CLI) {
     }
 
     function Process-AssistantMessage {
-        param($assistantMsg, [int]$Depth = 0)
+        param(
+            $assistantMsg,
+            [int]   $Depth       = 0,
+            [array] $Tools       = @(),
+            [string]$ToolCatalog = ""
+        )
         $maxDepth = if ($global:Config.MaxDepth) { $global:Config.MaxDepth } else { 10 }
         if ($Depth -ge $maxDepth) {
             Add-UIChatMessage -Role "system" -Message "[warn] Max tool call depth ($maxDepth) reached — stopping."
@@ -134,12 +139,15 @@ if ($CLI) {
                 Add-Message -Role $tr.role -Content $tr.content
             }
             Add-UIChatMessage -Role "system" -Message "Sending tool results..."
+            $captureTools   = $Tools
+            $captureCatalog = $ToolCatalog
+            $captureDepth   = $Depth
             $global:GUI.Window.Dispatcher.InvokeAsync({
-                $resp = Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools (Get-MatrixTools)
+                $resp = Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools $captureTools -ToolCatalog $captureCatalog
                 if ($resp.error) { Add-UIChatMessage -Role "system" -Message "Error: $($resp.error)" }
                 elseif ($resp.message) {
                     Add-Message -Role "assistant" -Content $resp.message.content
-                    Process-AssistantMessage -assistantMsg $resp -Depth ($Depth + 1)
+                    Process-AssistantMessage -assistantMsg $resp -Depth ($captureDepth + 1) -Tools $captureTools -ToolCatalog $captureCatalog
                     Prune-Context
                 }
             }, [System.Windows.Threading.DispatcherPriority]::Background) | Out-Null
@@ -155,13 +163,20 @@ if ($CLI) {
         $global:GUI.InputBox.IsEnabled   = $false
         Add-Message -Role "user" -Content $text
         Add-UIChatMessage -Role "system" -Message "Thinking..."
+        # Compute selection before Dispatcher so closure captures the right values
+        $selTools   = Select-MatrixTools `
+                          -UserMessage    $text `
+                          -MaxTokenBudget ($global:Config.ToolBudgetTokens ?? 6000) `
+                          -MaxCount       ($global:Config.MaxToolCount ?? 25) `
+                          -CoreTools      ($global:Config.CoreTools ?? @())
+        $selCatalog = Get-MatrixToolCatalog
         $global:GUI.Window.Dispatcher.InvokeAsync({
             try {
-                $resp = Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools (Get-MatrixTools)
+                $resp = Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools $selTools -ToolCatalog $selCatalog
                 if ($resp.error) { Add-UIChatMessage -Role "system" -Message "Error: $($resp.error)" }
                 else {
                     Add-Message -Role "assistant" -Content $resp.message.content
-                    Process-AssistantMessage -assistantMsg $resp
+                    Process-AssistantMessage -assistantMsg $resp -Tools $selTools -ToolCatalog $selCatalog
                     Prune-Context
                 }
             } catch {

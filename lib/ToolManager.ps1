@@ -6,11 +6,13 @@
 $script:ToolCache           = $null
 $script:ToolCacheMtime      = @{}   # BaseName → LastWriteTime
 $script:ToolDiscoveryErrors = @()   # @{ Name; Error } for each broken tool
+$script:ToolSchemaJsonCache = @{}   # BaseName → compact JSON string of full schema
 
 function Reset-ToolCache {
     $script:ToolCache           = $null
     $script:ToolCacheMtime      = @{}
     $script:ToolDiscoveryErrors = @()
+    $script:ToolSchemaJsonCache = @{}
 }
 
 function Get-MatrixTools {
@@ -127,8 +129,102 @@ function Get-MatrixTools {
     $script:ToolCacheMtime = @{}
     foreach ($s in $scripts) { $script:ToolCacheMtime[$s.BaseName] = $s.LastWriteTime }
 
+    # Pre-serialize each schema once for O(1) length lookups in Select-MatrixTools
+    $script:ToolSchemaJsonCache = @{}
+    foreach ($t in $unique) {
+        $script:ToolSchemaJsonCache[$t.function.name] = ($t | ConvertTo-Json -Depth 10 -Compress)
+    }
+
     Write-MatrixLog -Message "Tools ready: $($unique.Count) ($(($unique | ForEach-Object { $_.function.name } | Sort-Object) -join ', '))"
     return $script:ToolCache
+}
+
+# Returns a compact catalog string — one "ToolName: description" line per tool,
+# sorted alphabetically. Injected into the system prompt so the LLM always knows
+# what tools exist, even when only a subset of full schemas is loaded.
+function Get-MatrixToolCatalog {
+    if (-not $script:ToolCache) { return "" }
+    return ($script:ToolCache |
+        Sort-Object { $_.function.name } |
+        ForEach-Object { "$($_.function.name): $($_.function.description)" }
+    ) -join "`n"
+}
+
+# Selects the most relevant tool schemas for a given user message using keyword
+# scoring against tool name components and description words. CoreTools are always
+# included. Selection respects both a token budget and a count cap.
+# Returns: [array] of Ollama-compatible tool schema hashtables.
+function Select-MatrixTools {
+    param(
+        [string]   $UserMessage    = "",
+        [int]      $MaxTokenBudget = 6000,
+        [int]      $MaxCount       = 25,
+        [string[]] $CoreTools      = @()
+    )
+
+    if (-not $script:ToolCache -or $script:ToolCache.Count -eq 0) { return @() }
+
+    # Convert token budget to char budget (~3.5 chars per token)
+    $charBudget = [math]::Floor($MaxTokenBudget * 3.5)
+
+    # Extract unique meaningful words (>2 chars) from the user message
+    $words = @()
+    if (-not [string]::IsNullOrWhiteSpace($UserMessage)) {
+        $words = ($UserMessage -split '\W+') |
+                 Where-Object { $_.Length -gt 2 } |
+                 ForEach-Object { $_.ToLower() } |
+                 Select-Object -Unique
+    }
+
+    # Score each tool by keyword relevance
+    $scored = foreach ($tool in $script:ToolCache) {
+        $name    = $tool.function.name
+        $descLow = $tool.function.description.ToLower()
+
+        # Split "Get-Weather" → ["get","weather"], "Invoke-ShellCommand" → ["invoke","shell","command"]
+        $nameParts = @()
+        foreach ($seg in ($name -split '-')) {
+            [regex]::Matches($seg, '[A-Z][a-z]*|[0-9]+') | ForEach-Object { $nameParts += $_.Value.ToLower() }
+        }
+        $nameLow = $name.ToLower()
+
+        $score = 0
+        foreach ($w in $words) {
+            $esc = [regex]::Escape($w)
+            if ($w -in $nameParts)                      { $score += 3 }
+            elseif ($nameLow -match $esc)               { $score += 2 }
+            elseif ($descLow -match "\b$esc\b")         { $score += 1 }
+        }
+        [PSCustomObject]@{ Tool = $tool; Name = $name; Score = $score }
+    }
+
+    $selected    = [System.Collections.Generic.List[hashtable]]::new()
+    $usedChars   = 0
+    $selectedSet = @{}
+
+    # Pass 1: CoreTools — always included regardless of budget
+    foreach ($coreName in $CoreTools) {
+        if ($selectedSet[$coreName]) { continue }
+        $entry = $script:ToolCache | Where-Object { $_.function.name -eq $coreName } | Select-Object -First 1
+        if (-not $entry) { continue }
+        $jsonLen = if ($script:ToolSchemaJsonCache[$coreName]) { $script:ToolSchemaJsonCache[$coreName].Length } else { 500 }
+        $selected.Add($entry)
+        $usedChars += $jsonLen
+        $selectedSet[$coreName] = $true
+    }
+
+    # Pass 2: top-scored tools within budget and count cap
+    foreach ($item in ($scored | Sort-Object @{ Expression = 'Score'; Descending = $true }, @{ Expression = 'Name'; Ascending = $true })) {
+        if ($selected.Count -ge $MaxCount) { break }
+        if ($selectedSet[$item.Name]) { continue }
+        $jsonLen = if ($script:ToolSchemaJsonCache[$item.Name]) { $script:ToolSchemaJsonCache[$item.Name].Length } else { 500 }
+        if ($usedChars + $jsonLen -gt $charBudget) { continue }
+        $selected.Add($item.Tool)
+        $usedChars += $jsonLen
+        $selectedSet[$item.Name] = $true
+    }
+
+    return [array]$selected
 }
 
 function Invoke-MatrixTool {
