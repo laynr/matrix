@@ -207,6 +207,45 @@ $script:ToolCache      = $null
 $tools4 = Get-MatrixTools
 Assert-Equal "count restored after temp tool removed"  $tools1.Count  $tools4.Count
 
+# ── Get-DynamicNumCtx ─────────────────────────────────────────────────────────
+# These tests exist specifically to prevent the bug where tool schema tokens
+# were not counted, causing num_ctx < prompt size and Ollama 400 errors.
+
+Start-Suite "Dynamic num_ctx"
+
+$realTools = Get-MatrixTools
+
+# Override pin
+$pinned = Get-DynamicNumCtx -Messages @() -Tools @() -Override 16384
+Assert-Equal "Override pin respected"  16384  $pinned
+
+# No tools, no messages — should return minimum 4096
+$bare = Get-DynamicNumCtx -Messages @() -Tools @()
+Assert-True  "bare minimum >= 4096"  ($bare -ge 4096)
+
+# With 15 real tools: tool schemas alone are ~1500+ tokens; result must exceed
+# the raw token estimate of the tool JSON so the prompt fits in the context
+$toolJson   = $realTools | ConvertTo-Json -Depth 10 -Compress
+$toolTokens = [math]::Ceiling($toolJson.Length / 3.5)
+$withTools  = Get-DynamicNumCtx -Messages @() -Tools $realTools
+Assert-True  "num_ctx > tool token estimate"   ($withTools -gt $toolTokens)
+Assert-True  "num_ctx rounded to 512 boundary" ($withTools % 512 -eq 0)
+Assert-True  "num_ctx <= MaxCtx"               ($withTools -le 131072)
+
+# With tools + messages: must be larger than tools-only
+$msgs = @(
+    @{ role = "system"; content = "You are Matrix." },
+    @{ role = "user";   content = "What tools do you have?" }
+)
+$withBoth = Get-DynamicNumCtx -Messages $msgs -Tools $realTools
+Assert-True  "messages + tools > tools alone"  ($withBoth -ge $withTools)
+
+# Grows with conversation: a long conversation should produce a larger num_ctx
+$longMsgs = 1..20 | ForEach-Object { @{ role = "user"; content = ("word " * 200) } }
+$short = Get-DynamicNumCtx -Messages $msgs     -Tools $realTools
+$long  = Get-DynamicNumCtx -Messages $longMsgs -Tools $realTools
+Assert-True  "longer conversation → larger num_ctx"  ($long -gt $short)
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 $failed = Show-TestSummary
 exit $failed

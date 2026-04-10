@@ -11,22 +11,27 @@ function Get-MatrixHttpClient {
     return $script:HttpClient
 }
 
-# Computes num_ctx from actual message payload so the KV cache is sized to fit
-# the conversation rather than allocating the model's maximum.
+# Computes num_ctx from actual message payload + tool schemas so the KV cache
+# is sized to fit the full prompt. Tools must be included — their schemas can
+# easily exceed the message tokens on a fresh conversation.
 # Override: set Config.NumCtx > 0 to pin a fixed value (e.g. for debugging).
 function Get-DynamicNumCtx {
-    param([array]$Messages, [int]$Override = 0, [int]$MaxCtx = 131072)
+    param([array]$Messages, [array]$Tools, [int]$Override = 0, [int]$MaxCtx = 131072)
     if ($Override -gt 0) { return $Override }
 
-    $totalChars = ($Messages | ForEach-Object {
+    $msgChars = ($Messages | ForEach-Object {
         $c = if ($_.content -is [string]) { $_.content } else { $_.content | ConvertTo-Json -Compress }
         $c.Length
     } | Measure-Object -Sum).Sum
 
+    $toolChars = if ($Tools -and $Tools.Count -gt 0) {
+        ($Tools | ConvertTo-Json -Depth 10 -Compress).Length
+    } else { 0 }
+
     # ~3.5 chars per token; 2x headroom for the model's response
-    $needed = [math]::Ceiling($totalChars / 3.5) * 2
-    # Round up to the nearest 512 for clean allocation, min 2048
-    $rounded = [math]::Max(2048, [math]::Ceiling($needed / 512) * 512)
+    $needed  = [math]::Ceiling(($msgChars + $toolChars) / 3.5) * 2
+    # Round up to nearest 512, minimum 4096 (tools alone often need 1500+ tokens)
+    $rounded = [math]::Max(4096, [math]::Ceiling($needed / 512) * 512)
     return [math]::Min($MaxCtx, $rounded)
 }
 
@@ -66,12 +71,12 @@ function Invoke-MatrixChat {
         @(@{ role = "system"; content = $Config.SystemPrompt }) + $Messages
     } else { $Messages }
 
-    $numCtx = Get-DynamicNumCtx -Messages $messagesWithSystem -Override ([int]$Config.NumCtx)
+    $numCtx = Get-DynamicNumCtx -Messages $messagesWithSystem -Tools $Tools -Override ([int]$Config.NumCtx)
     $body = @{
         model      = $Config.Model
         messages   = $messagesWithSystem
         stream     = $false
-        keep_alive = "-1"
+        keep_alive = -1
         options    = @{ num_ctx = $numCtx }
     }
     if ($Tools -and $Tools.Count -gt 0) { $body.tools = $Tools }
@@ -129,12 +134,12 @@ function Invoke-MatrixStreamingChat {
         $Messages
     }
 
-    $numCtx = Get-DynamicNumCtx -Messages $messagesWithSystem -Override ([int]$Config.NumCtx)
+    $numCtx = Get-DynamicNumCtx -Messages $messagesWithSystem -Tools $Tools -Override ([int]$Config.NumCtx)
     $body = @{
         model      = $Config.Model
         messages   = $messagesWithSystem
         stream     = $true
-        keep_alive = "-1"
+        keep_alive = -1
         options    = @{ num_ctx = $numCtx }
     }
     if ($Tools -and $Tools.Count -gt 0) { $body.tools = $Tools }
