@@ -30,14 +30,13 @@ echo ""
 
 # ── Install pwsh if missing ────────────────────────────────────────────────────
 install_pwsh_macos() {
-    # Try Homebrew first (cask may be under microsoft tap)
+    # Try Homebrew casks in order of availability
     if command -v brew >/dev/null 2>&1; then
         info "Trying PowerShell via Homebrew..."
-        if ! brew install --cask powershell 2>/dev/null; then
-            info "Standard cask unavailable — trying Microsoft tap..."
-            brew tap microsoft/homebrew-tap 2>/dev/null || true
-            brew install --cask powershell 2>/dev/null || true
-        fi
+        brew install --cask powershell 2>/dev/null \
+            || brew install --cask powershell@preview 2>/dev/null \
+            || { brew tap microsoft/homebrew-tap 2>/dev/null; brew install --cask powershell 2>/dev/null; } \
+            || true
     fi
 
     # Fall through to .pkg if Homebrew didn't get us there
