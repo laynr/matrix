@@ -78,8 +78,7 @@ function Show-MatrixCLI {
             "exit"   { return }
             "quit"   { return }
             "reload" {
-                $script:ToolCache      = $null
-                $script:ToolCacheMtime = @{}
+                Reset-ToolCache
                 $tools = Get-MatrixTools
                 Write-Host "  Tools reloaded: $($tools.Count) ($( ($tools | ForEach-Object { $_.function.name }) -join ', '))" -ForegroundColor Cyan
                 if ($script:ToolDiscoveryErrors -and $script:ToolDiscoveryErrors.Count -gt 0) {

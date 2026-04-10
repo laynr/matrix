@@ -220,9 +220,12 @@ function Invoke-MatrixStreamingChat {
                 return @{ error = $msg }
             }
         } finally {
-            if ($reader) { try { $reader.Dispose() } catch {} }
+            if ($reader)     { try { $reader.Dispose()     } catch {} }
+            if ($httpResp)   { try { $httpResp.Dispose()   } catch {} }
+            if ($reqContent) { try { $reqContent.Dispose() } catch {} }
         }
     }
+    return @{ error = "All $maxRetries attempts failed" }
 }
 
 # Dispatches all tool calls in a message concurrently using PowerShell runspaces.

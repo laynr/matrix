@@ -1,5 +1,5 @@
 function Load-Config {
-    $configPath = Join-Path $PSScriptRoot "..\config.json"
+    $configPath = Join-Path $global:MatrixRoot "config.json"
     if (Test-Path $configPath) {
         try {
             $json = Get-Content $configPath -Raw | ConvertFrom-Json
@@ -26,6 +26,6 @@ function Load-Config {
 
 function Save-Config {
     param([hashtable]$Config)
-    $configPath = Join-Path $PSScriptRoot "..\config.json"
+    $configPath = Join-Path $global:MatrixRoot "config.json"
     $Config | ConvertTo-Json -Depth 5 | Set-Content $configPath -Encoding UTF8
 }

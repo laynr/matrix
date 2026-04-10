@@ -3,9 +3,15 @@
 # Parameters and .SYNOPSIS are parsed via PowerShell AST.
 # Schemas are cached in memory and only rebuilt when a tool file changes.
 
-$script:ToolCache          = $null
-$script:ToolCacheMtime     = @{}   # BaseName → LastWriteTime
-$script:ToolDiscoveryErrors = @()  # @{ Name; Error } for each broken tool
+$script:ToolCache           = $null
+$script:ToolCacheMtime      = @{}   # BaseName → LastWriteTime
+$script:ToolDiscoveryErrors = @()   # @{ Name; Error } for each broken tool
+
+function Reset-ToolCache {
+    $script:ToolCache           = $null
+    $script:ToolCacheMtime      = @{}
+    $script:ToolDiscoveryErrors = @()
+}
 
 function Get-MatrixTools {
     $root     = if ($global:MatrixRoot) { $global:MatrixRoot } else { Split-Path -Parent $PSScriptRoot }
