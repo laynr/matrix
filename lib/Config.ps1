@@ -8,6 +8,7 @@ function Load-Config {
                 Model        = [string]$json.Model
                 Endpoint     = [string]$json.Endpoint
                 SystemPrompt = [string]$json.SystemPrompt
+                NumCtx       = if ($json.NumCtx) { [int]$json.NumCtx } else { 8192 }
             }
         } catch {
             Write-Warning "Failed to parse config.json — using defaults. $_"
@@ -19,6 +20,7 @@ function Load-Config {
         Model        = "gemma4:latest"
         Endpoint     = "http://localhost:11434/api/chat"
         SystemPrompt = "You are Matrix, a helpful AI agent. Use the tools available to you when they are needed to answer the user. Be concise and direct."
+        NumCtx       = 8192
     }
 }
 
