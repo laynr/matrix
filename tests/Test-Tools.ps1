@@ -707,6 +707,139 @@ if (-not $SchemaOnly) {
     Remove-Item $xlsxPath -Force -EA SilentlyContinue
 }
 
+# ── ConvertTo-Base64 ──────────────────────────────────────────────────────────
+Start-Suite "ConvertTo-Base64"
+Test-ToolSchema "ConvertTo-Base64"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "ConvertTo-Base64" @{ Text = "hello world" }
+    Assert-ValidJson  "returns valid JSON"      $out
+    Assert-NoError    "no error"                $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has Base64"          $obj "Base64"
+    Assert-HasKey     "has SourceType"      $obj "SourceType"
+    Assert-Equal      "SourceType=Text"  "Text"  $obj.SourceType
+    Assert-Equal      "correct base64"  "aGVsbG8gd29ybGQ="  $obj.Base64
+
+    $tmpFile = [IO.Path]::GetTempFileName()
+    [IO.File]::WriteAllBytes($tmpFile, [byte[]]@(1,2,3,4,5))
+    $out2 = Invoke-Tool "ConvertTo-Base64" @{ FilePath = $tmpFile }
+    Assert-ValidJson  "file encode returns JSON"   $out2
+    Assert-NoError    "no error for file"           $out2
+    $obj2 = Get-ToolOutput $out2
+    Assert-Equal      "SourceType=File"  "File"   $obj2.SourceType
+    Assert-Equal      "OriginalSizeBytes=5"  5    $obj2.OriginalSizeBytes
+    Remove-Item $tmpFile -Force -EA SilentlyContinue
+
+    $out3 = Invoke-Tool "ConvertTo-Base64"
+    Assert-ValidJson  "no params returns JSON"  $out3
+    $obj3 = Get-ToolOutput $out3
+    Assert-True       "no params has error"  ($null -ne $obj3.error)
+}
+
+# ── ConvertFrom-Base64 ────────────────────────────────────────────────────────
+Start-Suite "ConvertFrom-Base64"
+Test-ToolSchema "ConvertFrom-Base64"
+if (-not $SchemaOnly) {
+    # Round-trip a known string
+    $out = Invoke-Tool "ConvertFrom-Base64" @{ Base64 = "aGVsbG8gd29ybGQ=" }
+    Assert-ValidJson  "returns valid JSON"    $out
+    Assert-NoError    "no error"              $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has Text"          $obj "Text"
+    Assert-Equal      "decoded correctly"  "hello world"  $obj.Text
+
+    # Decode to file
+    $tmpDst = Join-Path ([IO.Path]::GetTempPath()) "matrix-b64-dst-$PID.bin"
+    $out2 = Invoke-Tool "ConvertFrom-Base64" @{ Base64 = "AQIDBAU="; FilePath = $tmpDst }
+    Assert-ValidJson  "file decode returns JSON"   $out2
+    Assert-NoError    "no error for file decode"   $out2
+    $obj2 = Get-ToolOutput $out2
+    Assert-Equal      "SizeBytes=5"  5  $obj2.SizeBytes
+    Assert-True       "file written"  (Test-Path $tmpDst)
+    Remove-Item $tmpDst -Force -EA SilentlyContinue
+
+    # Invalid base64
+    $out3 = Invoke-Tool "ConvertFrom-Base64" @{ Base64 = "not!valid!base64!!!" }
+    Assert-ValidJson  "bad base64 returns JSON"  $out3
+    $obj3 = Get-ToolOutput $out3
+    Assert-True       "bad base64 has error"  ($null -ne $obj3.error)
+}
+
+# ── Get-RegexMatches ──────────────────────────────────────────────────────────
+Start-Suite "Get-RegexMatches"
+Test-ToolSchema "Get-RegexMatches"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "Get-RegexMatches" @{ Pattern = '\d+'; InputText = "abc 123 def 456" }
+    Assert-ValidJson  "returns valid JSON"    $out
+    Assert-NoError    "no error"              $out
+    $obj = Get-ToolOutput $out
+    Assert-Equal      "MatchCount = 2"  2  $obj.MatchCount
+
+    # Named capture group
+    $out2 = Invoke-Tool "Get-RegexMatches" @{ Pattern = '(?<word>[a-z]+)'; InputText = "hello world" }
+    $obj2 = Get-ToolOutput $out2
+    Assert-Equal      "2 word matches"  2  $obj2.MatchCount
+
+    # No matches
+    $out3 = Invoke-Tool "Get-RegexMatches" @{ Pattern = '\d{10}'; InputText = "no numbers here" }
+    $obj3 = Get-ToolOutput $out3
+    Assert-Equal      "MatchCount = 0"  0  $obj3.MatchCount
+
+    # Invalid regex
+    $out4 = Invoke-Tool "Get-RegexMatches" @{ Pattern = '[invalid'; InputText = "test" }
+    Assert-ValidJson  "bad regex returns JSON"  $out4
+    $obj4 = Get-ToolOutput $out4
+    Assert-True       "bad regex has error"  ($null -ne $obj4.error)
+}
+
+# ── Invoke-TextTemplate ───────────────────────────────────────────────────────
+Start-Suite "Invoke-TextTemplate"
+Test-ToolSchema "Invoke-TextTemplate"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "Invoke-TextTemplate" @{
+        Template  = "Hello {{name}}, you are {{age}} years old."
+        Variables = @{ name = "Alice"; age = "30" }
+    }
+    Assert-ValidJson  "returns valid JSON"    $out
+    Assert-NoError    "no error"              $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has Result"   $obj "Result"
+    Assert-Equal      "correct substitution"  "Hello Alice, you are 30 years old."  $obj.Result
+    Assert-Equal      "ReplacementsMade = 2"  2  $obj.ReplacementsMade
+
+    # Missing variable — unreplaced placeholder stays
+    $out2 = Invoke-Tool "Invoke-TextTemplate" @{
+        Template  = "Hello {{name}} from {{city}}"
+        Variables = @{ name = "Bob" }
+    }
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "partial replace: name filled"  ($obj2.Result -match "Bob")
+    Assert-True       "partial replace: city kept"    ($obj2.Result -match "\{\{city\}\}")
+}
+
+# ── Get-ClipboardContent ──────────────────────────────────────────────────────
+Start-Suite "Get-ClipboardContent"
+Test-ToolSchema "Get-ClipboardContent"
+if (-not $SchemaOnly) {
+    # Set then get — if clipboard unavailable the tool returns graceful error
+    Invoke-Tool "Set-ClipboardContent" @{ Text = "matrix-clipboard-test-$PID" } | Out-Null
+    $out = Invoke-Tool "Get-ClipboardContent"
+    Assert-ValidJson  "returns valid JSON"  $out
+    # Don't assert NoError — clipboard may be unavailable in CI
+    $obj = Get-ToolOutput $out
+    Assert-True       "has Content or error field"  ($null -ne $obj.Content -or $null -ne $obj.error)
+}
+
+# ── Set-ClipboardContent ──────────────────────────────────────────────────────
+Start-Suite "Set-ClipboardContent"
+Test-ToolSchema "Set-ClipboardContent"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "Set-ClipboardContent" @{ Text = "matrix-set-clipboard-$PID" }
+    Assert-ValidJson  "returns valid JSON"  $out
+    $obj = Get-ToolOutput $out
+    Assert-True       "has Success or error field"  ($null -ne $obj.Success -or $null -ne $obj.error)
+}
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 $failed = Show-TestSummary
 exit $failed
