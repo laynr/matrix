@@ -82,6 +82,11 @@ function Show-MatrixCLI {
                 $script:ToolCacheMtime = @{}
                 $tools = Get-MatrixTools
                 Write-Host "  Tools reloaded: $($tools.Count) ($( ($tools | ForEach-Object { $_.function.name }) -join ', '))" -ForegroundColor Cyan
+                if ($script:ToolDiscoveryErrors -and $script:ToolDiscoveryErrors.Count -gt 0) {
+                    foreach ($e in $script:ToolDiscoveryErrors) {
+                        Write-Host "  [warn] '$($e.Name)' failed to load: $($e.Error)" -ForegroundColor Yellow
+                    }
+                }
                 continue
             }
         }

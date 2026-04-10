@@ -3,8 +3,9 @@
 # Parameters and .SYNOPSIS are parsed via PowerShell AST.
 # Schemas are cached in memory and only rebuilt when a tool file changes.
 
-$script:ToolCache      = $null
-$script:ToolCacheMtime = @{}   # BaseName → LastWriteTime
+$script:ToolCache          = $null
+$script:ToolCacheMtime     = @{}   # BaseName → LastWriteTime
+$script:ToolDiscoveryErrors = @()  # @{ Name; Error } for each broken tool
 
 function Get-MatrixTools {
     $root     = if ($global:MatrixRoot) { $global:MatrixRoot } else { Split-Path -Parent $PSScriptRoot }
@@ -29,6 +30,7 @@ function Get-MatrixTools {
     }
 
     Write-MatrixLog -Message "Rebuilding tool cache ($($scripts.Count) scripts)"
+    $script:ToolDiscoveryErrors = @()
 
     $discovered = foreach ($script in $scripts) {
         try {
@@ -94,7 +96,9 @@ function Get-MatrixTools {
                 }
             }
         } catch {
-            Write-MatrixLog -Level "ERROR" -Message "Tool discovery error ($($script.Name)): $_"
+            $errMsg = [string]$_
+            Write-MatrixLog -Level "ERROR" -Message "Tool discovery error ($($script.Name)): $errMsg"
+            $script:ToolDiscoveryErrors += @{ Name = $script.BaseName; Error = $errMsg }
         }
     }
 
