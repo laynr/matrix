@@ -60,11 +60,18 @@ fi
 # ── 4. mktemp portability ──────────────────────────────────────────────────────
 suite "mktemp portability"
 
-# Verify install.sh does NOT use the broken pattern (suffix embedded in template)
+# Verify install.sh does NOT use the broken mktemp pattern
 if grep -qF 'mktemp /tmp/matrix_install.XXXXXX.ps1' "$INSTALL_SH" 2>/dev/null; then
     fail "install.sh uses broken mktemp pattern — suffix must not be inside template"
 else
     pass "install.sh mktemp pattern is portable (no suffix in template)"
+fi
+
+# Verify installer URL comes from releases (not raw.githubusercontent main — CDN-cached)
+if grep -qF 'raw.githubusercontent.com/laynr/matrix/main/install.pwsh.ps1' "$INSTALL_SH" 2>/dev/null; then
+    fail "install.sh fetches install.pwsh.ps1 from raw/main — use releases URL instead"
+else
+    pass "install.sh fetches install.pwsh.ps1 from releases (not raw/main)"
 fi
 
 # Verify the actual pattern used works on this platform

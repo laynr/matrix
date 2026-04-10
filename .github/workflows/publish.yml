@@ -26,7 +26,7 @@ jobs:
           git tag -d latest 2>/dev/null || true
           gh api -X DELETE repos/${{ github.repository }}/git/refs/tags/latest 2>/dev/null || true
 
-          gh release create latest matrix-release.zip \
+          gh release create latest matrix-release.zip install.pwsh.ps1 \
             --title "Latest" \
             --notes "Latest Matrix release. Install with the one-liner in the README." \
             --latest

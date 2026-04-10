@@ -12,7 +12,7 @@ set -e
 
 OS="$(uname -s)"
 ARCH="$(uname -m)"
-PWSH_INSTALLER_URL="https://raw.githubusercontent.com/laynr/matrix/main/install.pwsh.ps1"
+PWSH_INSTALLER_URL="https://github.com/laynr/matrix/releases/latest/download/install.pwsh.ps1"
 
 GREEN='\033[0;32m'; CYAN='\033[0;36m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 ok()   { printf "  ${GREEN}[ok]${NC}    %s\n" "$*"; }
