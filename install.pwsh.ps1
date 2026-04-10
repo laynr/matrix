@@ -9,7 +9,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$RELEASE_ZIP = "https://github.com/laynr/matrix/releases/download/latest/matrix-release.zip"
+$RELEASE_ZIP = if ($env:MATRIX_RELEASE_ZIP) { $env:MATRIX_RELEASE_ZIP } else { "https://github.com/laynr/matrix/releases/download/latest/matrix-release.zip" }
 $INSTALL_DIR = if ($env:MATRIX_HOME) { $env:MATRIX_HOME } else { Join-Path $HOME ".matrix" }
 $MODEL       = if ($env:MATRIX_MODEL) { $env:MATRIX_MODEL } else { "gemma4:latest" }
 
@@ -120,7 +120,11 @@ if ($modelList -match [regex]::Escape($modelBase)) {
 Write-Info "Downloading Matrix to $INSTALL_DIR..."
 $tmpZip = [IO.Path]::ChangeExtension([IO.Path]::GetTempFileName(), ".zip")
 try {
-    Invoke-WebRequest $RELEASE_ZIP -OutFile $tmpZip -UseBasicParsing
+    if (Test-Path $RELEASE_ZIP -EA SilentlyContinue) {
+        Copy-Item $RELEASE_ZIP $tmpZip
+    } else {
+        Invoke-WebRequest $RELEASE_ZIP -OutFile $tmpZip -UseBasicParsing
+    }
     if (Test-Path $INSTALL_DIR) { Remove-Item $INSTALL_DIR -Recurse -Force }
     New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
     Expand-Archive $tmpZip -DestinationPath $INSTALL_DIR -Force
@@ -145,13 +149,18 @@ if ($IsWindows) {
     Write-Ok "Installed 'matrix' → $launcher"
 } else {
     # Mac / Linux: write an executable shell script so 'matrix' works anywhere
-    $binCandidates = @("/usr/local/bin", "/opt/homebrew/bin", "$HOME/.local/bin", "$HOME/bin")
-    $binDir = $binCandidates | Where-Object { (Test-Path $_) -and (Get-Item $_).Attributes -notmatch "ReadOnly" } |
-              Select-Object -First 1
+    if ($env:MATRIX_BIN_DIR) {
+        $binDir = $env:MATRIX_BIN_DIR
+        if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
+    } else {
+        $binCandidates = @("/usr/local/bin", "/opt/homebrew/bin", "$HOME/.local/bin", "$HOME/bin")
+        $binDir = $binCandidates | Where-Object { (Test-Path $_) -and (Get-Item $_).Attributes -notmatch "ReadOnly" } |
+                  Select-Object -First 1
 
-    if (-not $binDir) {
-        $binDir = "$HOME/.local/bin"
-        New-Item -ItemType Directory -Path $binDir -Force | Out-Null
+        if (-not $binDir) {
+            $binDir = "$HOME/.local/bin"
+            New-Item -ItemType Directory -Path $binDir -Force | Out-Null
+        }
     }
 
     $launcher = Join-Path $binDir "matrix"
@@ -162,12 +171,14 @@ exec pwsh -NoProfile -ExecutionPolicy Bypass -File "$matrixScript" "`$@"
     chmod +x $launcher
     Write-Ok "Installed 'matrix' → $launcher"
 
-    # Ensure binDir is in PATH via shell profile
-    foreach ($profile in @("$HOME/.zshrc", "$HOME/.bash_profile", "$HOME/.profile")) {
-        if ((Test-Path $profile) -and -not (Get-Content $profile -Raw -EA SilentlyContinue).Contains($binDir)) {
-            Add-Content $profile "`n# Added by Matrix installer`nexport PATH=`"$binDir`:`$PATH`""
-            Write-Info "Added $binDir to PATH in $profile"
-            break
+    # Ensure binDir is in PATH via shell profile (skipped during tests)
+    if (-not $env:MATRIX_NO_PROFILE) {
+        foreach ($profile in @("$HOME/.zshrc", "$HOME/.bash_profile", "$HOME/.profile")) {
+            if ((Test-Path $profile) -and -not (Get-Content $profile -Raw -EA SilentlyContinue).Contains($binDir)) {
+                Add-Content $profile "`n# Added by Matrix installer`nexport PATH=`"$binDir`:`$PATH`""
+                Write-Info "Added $binDir to PATH in $profile"
+                break
+            }
         }
     }
 }
@@ -181,10 +192,12 @@ Write-Host "  Starting Matrix now..."
 Write-Host ""
 
 # Re-open stdin from the terminal if we were piped from curl|sh
-if ($IsWindows) {
-    & $matrixScript -CLI
-} else {
-    # Launch via shell so the </dev/tty redirect works
-    $shell = if (Test-Path "/bin/zsh") { "/bin/zsh" } else { "/bin/sh" }
-    & $shell -c "pwsh -NoProfile -ExecutionPolicy Bypass -File '$matrixScript' -CLI </dev/tty"
+if (-not $env:MATRIX_NO_LAUNCH) {
+    if ($IsWindows) {
+        & $matrixScript -CLI
+    } else {
+        # Launch via shell so the </dev/tty redirect works
+        $shell = if (Test-Path "/bin/zsh") { "/bin/zsh" } else { "/bin/sh" }
+        & $shell -c "pwsh -NoProfile -ExecutionPolicy Bypass -File '$matrixScript' -CLI </dev/tty"
+    }
 }
