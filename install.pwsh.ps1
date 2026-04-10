@@ -154,8 +154,13 @@ if ($IsWindows) {
         if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
     } else {
         $binCandidates = @("/usr/local/bin", "/opt/homebrew/bin", "$HOME/.local/bin", "$HOME/bin")
-        $binDir = $binCandidates | Where-Object { (Test-Path $_) -and (Get-Item $_).Attributes -notmatch "ReadOnly" } |
-                  Select-Object -First 1
+        $binDir = $binCandidates | Where-Object {
+            if (-not (Test-Path $_)) { return $false }
+            # Attributes-based ReadOnly check doesn't reflect Unix permissions — probe directly
+            $probe = Join-Path $_ ".matrix-write-test-$PID"
+            try { [IO.File]::WriteAllText($probe, ""); Remove-Item $probe -Force -EA SilentlyContinue; $true }
+            catch { $false }
+        } | Select-Object -First 1
 
         if (-not $binDir) {
             $binDir = "$HOME/.local/bin"

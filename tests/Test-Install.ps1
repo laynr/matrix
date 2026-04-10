@@ -186,7 +186,57 @@ try {
     Add-Result -Test "Smoke test" -Passed $false -Detail "$_"
 }
 
-# ── 5. Uninstall ──────────────────────────────────────────────────────────────
+# ── 5. Bin-dir candidate selection (non-Windows) ──────────────────────────────
+if (-not $IsWindows) {
+    Start-Suite "Bin-dir candidate selection [$platform]"
+
+    # Run installer without MATRIX_BIN_DIR so the candidate-probe logic runs.
+    # Inject a writable temp dir as the first candidate by pre-staging it.
+    $candidateBin  = Join-Path ([IO.Path]::GetTempPath()) "matrix-test-cand-$PID"
+    $candidateHome = Join-Path ([IO.Path]::GetTempPath()) "matrix-test-chome-$PID"
+    New-Item -ItemType Directory -Path $candidateBin  -Force | Out-Null
+    New-Item -ItemType Directory -Path $candidateHome -Force | Out-Null
+
+    $zipPath2 = $null
+    try {
+        $zipPath2 = New-TestReleaseZip
+
+        # Patch the candidate list in a temp copy of the installer
+        $tmpInstaller = [IO.Path]::ChangeExtension([IO.Path]::GetTempFileName(), ".ps1")
+        (Get-Content $installerPath -Raw) -replace
+            [regex]::Escape('@("/usr/local/bin", "/opt/homebrew/bin", "$HOME/.local/bin", "$HOME/bin")'),
+            "@(`"$candidateBin`")" |
+            Set-Content $tmpInstaller -Encoding UTF8
+
+        $env:MATRIX_HOME        = $candidateHome
+        $env:MATRIX_MODEL       = "stub-model:latest"
+        $env:MATRIX_RELEASE_ZIP = $zipPath2
+        $env:MATRIX_NO_PROFILE  = "1"
+        $env:MATRIX_NO_LAUNCH   = "1"
+
+        $output2    = pwsh -NoProfile -ExecutionPolicy Bypass -File $tmpInstaller 2>&1 | Out-String
+        $exitCode2  = $LASTEXITCODE
+
+        Assert-True  "installer exits cleanly without MATRIX_BIN_DIR" ($exitCode2 -eq 0)
+        Assert-True  "launcher written to candidate dir" (Test-Path (Join-Path $candidateBin "matrix"))
+        $isExec = & sh -c "[ -x '$(Join-Path $candidateBin "matrix")' ] && echo 1 || echo 0" 2>/dev/null
+        Assert-True  "candidate launcher is executable" ($isExec.Trim() -eq "1")
+
+    } catch {
+        Add-Result -Test "bin-dir candidate selection" -Passed $false -Detail "$_"
+    } finally {
+        Remove-Item Env:MATRIX_HOME        -EA SilentlyContinue
+        Remove-Item Env:MATRIX_MODEL       -EA SilentlyContinue
+        Remove-Item Env:MATRIX_RELEASE_ZIP -EA SilentlyContinue
+        Remove-Item Env:MATRIX_NO_PROFILE  -EA SilentlyContinue
+        Remove-Item Env:MATRIX_NO_LAUNCH   -EA SilentlyContinue
+        if ($zipPath2) { Remove-Item $zipPath2 -Force -EA SilentlyContinue }
+        if ($tmpInstaller) { Remove-Item $tmpInstaller -Force -EA SilentlyContinue }
+        Remove-Item $candidateBin, $candidateHome -Recurse -Force -EA SilentlyContinue
+    }
+}
+
+# ── 6. Uninstall ──────────────────────────────────────────────────────────────
 Start-Suite "Uninstall [$platform]"
 
 try {
