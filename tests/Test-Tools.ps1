@@ -424,6 +424,154 @@ if (-not $SchemaOnly) {
     Assert-True       "ConnectionCount is non-negative"  ($obj.ConnectionCount -ge 0)
 }
 
+# ── New-ZipArchive ────────────────────────────────────────────────────────────
+Start-Suite "New-ZipArchive"
+Test-ToolSchema "New-ZipArchive"
+if (-not $SchemaOnly) {
+    $tmpDir = Join-Path ([IO.Path]::GetTempPath()) "matrix-zip-src-$PID"
+    New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+    "file one"  | Set-Content (Join-Path $tmpDir "a.txt") -Encoding UTF8
+    "file two"  | Set-Content (Join-Path $tmpDir "b.txt") -Encoding UTF8
+    $zipPath = Join-Path ([IO.Path]::GetTempPath()) "matrix-test-$PID.zip"
+
+    $out = Invoke-Tool "New-ZipArchive" @{ SourcePath = $tmpDir; DestinationPath = $zipPath }
+    Assert-ValidJson  "returns valid JSON"    $out
+    Assert-NoError    "no error"              $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has SizeBytes"     $obj "SizeBytes"
+    Assert-HasKey     "has EntryCount"    $obj "EntryCount"
+    Assert-True       "SizeBytes > 0"     ($obj.SizeBytes -gt 0)
+    Assert-True       "EntryCount = 2"    ($obj.EntryCount -eq 2)
+    Assert-True       "zip file exists"   (Test-Path $zipPath)
+
+    # Overwrite guard
+    $out2 = Invoke-Tool "New-ZipArchive" @{ SourcePath = $tmpDir; DestinationPath = $zipPath; Overwrite = $false }
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "no-overwrite returns error"  ($null -ne $obj2.error)
+
+    # Overwrite=true replaces
+    $out3 = Invoke-Tool "New-ZipArchive" @{ SourcePath = $tmpDir; DestinationPath = $zipPath; Overwrite = $true }
+    Assert-NoError    "overwrite=true succeeds"  $out3
+
+    Remove-Item $tmpDir  -Recurse -Force -EA SilentlyContinue
+    # keep $zipPath for Expand test below
+}
+
+# ── Expand-ZipArchive ─────────────────────────────────────────────────────────
+Start-Suite "Expand-ZipArchive"
+Test-ToolSchema "Expand-ZipArchive"
+if (-not $SchemaOnly) {
+    $zipPath  = Join-Path ([IO.Path]::GetTempPath()) "matrix-test-$PID.zip"
+    $xDst     = Join-Path ([IO.Path]::GetTempPath()) "matrix-zip-dst-$PID"
+
+    if (Test-Path $zipPath) {
+        $out = Invoke-Tool "Expand-ZipArchive" @{ SourcePath = $zipPath; DestinationPath = $xDst }
+        Assert-ValidJson  "returns valid JSON"    $out
+        Assert-NoError    "no error"              $out
+        $obj = Get-ToolOutput $out
+        Assert-HasKey     "has EntryCount"    $obj "EntryCount"
+        Assert-HasKey     "has Files"         $obj "Files"
+        Assert-True       "EntryCount = 2"    ($obj.EntryCount -eq 2)
+        Assert-True       "extracted dir exists"  (Test-Path $xDst)
+    } else {
+        # Create a fresh zip for this test
+        $tmpFile = [IO.Path]::GetTempFileName()
+        "hello" | Set-Content $tmpFile
+        Invoke-Tool "New-ZipArchive" @{ SourcePath = $tmpFile; DestinationPath = $zipPath; Overwrite = $true } | Out-Null
+        $out = Invoke-Tool "Expand-ZipArchive" @{ SourcePath = $zipPath; DestinationPath = $xDst }
+        Assert-ValidJson  "returns valid JSON"  $out
+        Assert-NoError    "no error"            $out
+        Remove-Item $tmpFile -Force -EA SilentlyContinue
+    }
+
+    $out2 = Invoke-Tool "Expand-ZipArchive" @{
+        SourcePath      = (Join-Path ([IO.Path]::GetTempPath()) "no-such-file-xyz.zip")
+        DestinationPath = $xDst
+    }
+    Assert-ValidJson  "bad source returns JSON"  $out2
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "bad source has error"  ($null -ne $obj2.error)
+
+    Remove-Item $xDst    -Recurse -Force -EA SilentlyContinue
+    Remove-Item $zipPath -Force         -EA SilentlyContinue
+}
+
+# ── Get-DirectoryTree ─────────────────────────────────────────────────────────
+Start-Suite "Get-DirectoryTree"
+Test-ToolSchema "Get-DirectoryTree"
+if (-not $SchemaOnly) {
+    $toolsDir = Join-Path $PSScriptRoot ".." "tools"
+    $out = Invoke-Tool "Get-DirectoryTree" @{ Path = $toolsDir }
+    Assert-ValidJson  "returns valid JSON"   $out
+    Assert-NoError    "no error"             $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has TotalFiles"   $obj "TotalFiles"
+    Assert-HasKey     "has Tree"         $obj "Tree"
+    Assert-True       "TotalFiles >= 15"  ($obj.TotalFiles -ge 15)
+
+    $out2 = Invoke-Tool "Get-DirectoryTree" @{ Path = (Join-Path ([IO.Path]::GetTempPath()) "no-dir-xyz-$PID") }
+    Assert-ValidJson  "bad path returns JSON"  $out2
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "bad path has error"  ($null -ne $obj2.error)
+}
+
+# ── Copy-FileItem ─────────────────────────────────────────────────────────────
+Start-Suite "Copy-FileItem"
+Test-ToolSchema "Copy-FileItem"
+if (-not $SchemaOnly) {
+    $src = [IO.Path]::GetTempFileName()
+    "copy test content" | Set-Content $src -Encoding UTF8
+    $dst = Join-Path ([IO.Path]::GetTempPath()) "matrix-copy-dst-$PID.txt"
+
+    $out = Invoke-Tool "Copy-FileItem" @{ Source = $src; Destination = $dst }
+    Assert-ValidJson  "returns valid JSON"   $out
+    Assert-NoError    "no error"             $out
+    $obj = Get-ToolOutput $out
+    Assert-True       "destination exists"   (Test-Path $dst)
+    Assert-Equal      "IsDirectory=false"  $false  $obj.IsDirectory
+
+    # Overwrite guard
+    $out2 = Invoke-Tool "Copy-FileItem" @{ Source = $src; Destination = $dst; Overwrite = $false }
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "existing dest returns error"  ($null -ne $obj2.error)
+
+    # Overwrite=true
+    $out3 = Invoke-Tool "Copy-FileItem" @{ Source = $src; Destination = $dst; Overwrite = $true }
+    Assert-NoError    "overwrite=true succeeds"  $out3
+
+    Remove-Item $src -Force -EA SilentlyContinue
+    Remove-Item $dst -Force -EA SilentlyContinue
+}
+
+# ── Remove-FileItem ───────────────────────────────────────────────────────────
+Start-Suite "Remove-FileItem"
+Test-ToolSchema "Remove-FileItem"
+if (-not $SchemaOnly) {
+    $tmpFile = [IO.Path]::GetTempFileName()
+    "to be deleted" | Set-Content $tmpFile -Encoding UTF8
+
+    # Confirm=$true (default) — should NOT delete
+    $out = Invoke-Tool "Remove-FileItem" @{ Path = $tmpFile }
+    Assert-ValidJson  "returns valid JSON (Confirm=true)"   $out
+    $obj = Get-ToolOutput $out
+    Assert-True       "Confirm=true returns error"   ($null -ne $obj.error)
+    Assert-True       "file still exists after Confirm=true guard"  (Test-Path $tmpFile)
+
+    # Confirm=$false — should delete
+    $out2 = Invoke-Tool "Remove-FileItem" @{ Path = $tmpFile; Confirm = $false }
+    Assert-ValidJson  "returns valid JSON (Confirm=false)"  $out2
+    Assert-NoError    "no error on delete"                  $out2
+    $obj2 = Get-ToolOutput $out2
+    Assert-Equal      "Deleted=true"  $true  $obj2.Deleted
+    Assert-True       "file gone after delete"  (-not (Test-Path $tmpFile))
+
+    # Missing path
+    $out3 = Invoke-Tool "Remove-FileItem" @{ Path = $tmpFile; Confirm = $false }
+    Assert-ValidJson  "missing path returns JSON"  $out3
+    $obj3 = Get-ToolOutput $out3
+    Assert-True       "missing path has error"  ($null -ne $obj3.error)
+}
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 $failed = Show-TestSummary
 exit $failed
