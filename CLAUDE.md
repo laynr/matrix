@@ -61,6 +61,15 @@ Full suite (requires Ollama):
 pwsh tests/Run-Tests.ps1
 ```
 
+This includes `Test-LiveAgent.ps1` — two suites:
+- **E2E**: sends "do something that uses all your tools" through the real streaming pipeline
+- **Per-tool**: one test per discovered tool, exposing only that tool to the model to force deterministic invocation
+
+Run just the live tests:
+```powershell
+pwsh tests/Run-Tests.ps1 -Suite LiveAgent
+```
+
 ### After every commit
 
 Check whether any new pattern, decision, or preference should be saved:
