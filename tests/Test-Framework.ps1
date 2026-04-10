@@ -74,8 +74,11 @@ function Assert-Equal {
 
 function Assert-HasKey {
     param([string]$Test, $Object, [string]$Key)
-    $passed = $null -ne $Object -and $null -ne $Object.$Key
-    Add-Result -Test $Test -Passed $passed -Detail $(if (-not $passed) { "key '$Key' missing or null" })
+    $keyExists = $null -ne $Object -and (
+        ($Object -is [System.Collections.IDictionary] -and $Object.Contains($Key)) -or
+        ($Object.PSObject.Properties.Name -contains $Key)
+    )
+    Add-Result -Test $Test -Passed $keyExists -Detail $(if (-not $keyExists) { "key '$Key' missing" })
 }
 
 function Assert-NoError {
@@ -148,8 +151,10 @@ function Test-ToolSchema {
         Assert-True "$ToolName has .SYNOPSIS" `
             ($null -ne $help -and -not [string]::IsNullOrWhiteSpace($help.Synopsis))
 
-        Assert-True "$ToolName has [CmdletBinding()]" `
-            ($null -ne $ast.UsingStatements -or $null -ne $ast.ParamBlock)
+        $hasCmdletBinding = $ast.ParamBlock -and (
+            $ast.ParamBlock.Attributes | Where-Object { $_.TypeName.Name -eq 'CmdletBinding' }
+        )
+        Assert-True "$ToolName has [CmdletBinding()]" ([bool]$hasCmdletBinding)
 
         # Every mandatory param should have a .PARAMETER doc entry
         if ($ast.ParamBlock) {
