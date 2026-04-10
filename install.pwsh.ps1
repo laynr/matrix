@@ -146,7 +146,7 @@ if ($IsWindows) {
 } else {
     # Mac / Linux: write an executable shell script so 'matrix' works anywhere
     $binCandidates = @("/usr/local/bin", "/opt/homebrew/bin", "$HOME/.local/bin", "$HOME/bin")
-    $binDir = $binCandidates | Where-Object { Test-Path $_ -and (Get-Item $_).Attributes -notmatch "ReadOnly" } |
+    $binDir = $binCandidates | Where-Object { (Test-Path $_) -and (Get-Item $_).Attributes -notmatch "ReadOnly" } |
               Select-Object -First 1
 
     if (-not $binDir) {
