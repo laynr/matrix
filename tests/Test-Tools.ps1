@@ -1361,6 +1361,88 @@ if (-not $SchemaOnly) {
     Assert-True       "RecordCount > 0"  ($obj.RecordCount -gt 0)
 }
 
+# ── Send-Email ─────────────────────────────────────────────────────────────────
+Start-Suite "Send-Email"
+Test-ToolSchema "Send-Email"
+if (-not $SchemaOnly) {
+    # Error path only — no real SMTP in CI
+    $out = Invoke-Tool "Send-Email" @{
+        SmtpServer = "smtp.invalid.test.local"
+        From       = "test@example.com"
+        To         = "dest@example.com"
+        Subject    = "Test"
+        Body       = "Test body"
+    }
+    Assert-ValidJson  "returns valid JSON"          $out
+    $obj = Get-ToolOutput $out
+    Assert-True       "bad server returns error"   ($null -ne $obj.error)
+}
+
+# ── Send-WebhookMessage ────────────────────────────────────────────────────────
+Start-Suite "Send-WebhookMessage"
+Test-ToolSchema "Send-WebhookMessage"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "Send-WebhookMessage" @{
+        Url     = "https://httpbin.org/post"
+        Payload = @{ message = "Matrix test"; timestamp = "2026-01-01" }
+    }
+    Assert-ValidJson  "returns valid JSON"   $out
+    Assert-NoError    "no error"             $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has StatusCode"  $obj "StatusCode"
+    Assert-HasKey     "has Success"     $obj "Success"
+    Assert-Equal      "StatusCode = 200"  200  $obj.StatusCode
+    Assert-True       "Success = true"  ($obj.Success -eq $true)
+}
+
+# ── Send-SlackMessage ──────────────────────────────────────────────────────────
+Start-Suite "Send-SlackMessage"
+Test-ToolSchema "Send-SlackMessage"
+if (-not $SchemaOnly) {
+    # Error path — invalid webhook URL should return gracefully
+    $out = Invoke-Tool "Send-SlackMessage" @{
+        WebhookUrl = "https://hooks.slack.com/services/INVALID/INVALID/INVALID"
+        Text       = "Matrix test"
+    }
+    Assert-ValidJson  "returns valid JSON"  $out
+    $obj = Get-ToolOutput $out
+    Assert-True       "invalid URL returns error or non-success"  ($null -ne $obj.error -or $obj.Success -eq $false)
+}
+
+# ── Send-TeamsMessage ──────────────────────────────────────────────────────────
+Start-Suite "Send-TeamsMessage"
+Test-ToolSchema "Send-TeamsMessage"
+if (-not $SchemaOnly) {
+    # Test with httpbin returning 400 — verifies Success=$false for non-2xx
+    $out = Invoke-Tool "Send-TeamsMessage" @{
+        WebhookUrl = "https://httpbin.org/status/400"
+        Title      = "Matrix Test"
+        Text       = "Test message"
+        Facts      = @{ Key = "Value"; Agent = "Matrix" }
+    }
+    Assert-ValidJson  "returns valid JSON"  $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has StatusCode"  $obj "StatusCode"
+    Assert-True       "400 is non-success"  ($obj.Success -eq $false)
+}
+
+# ── Invoke-TwilioSms ──────────────────────────────────────────────────────────
+Start-Suite "Invoke-TwilioSms"
+Test-ToolSchema "Invoke-TwilioSms"
+if (-not $SchemaOnly) {
+    # Error path — invalid credentials return 401 error
+    $out = Invoke-Tool "Invoke-TwilioSms" @{
+        AccountSid = "ACfakesid00000000000000000000000"
+        AuthToken  = "fakeauthtoken0000000000000000000"
+        From       = "+15551234567"
+        To         = "+15559876543"
+        Body       = "Matrix test"
+    }
+    Assert-ValidJson  "returns valid JSON"     $out
+    $obj = Get-ToolOutput $out
+    Assert-True       "bad creds returns error"  ($null -ne $obj.error)
+}
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 $failed = Show-TestSummary
 exit $failed
