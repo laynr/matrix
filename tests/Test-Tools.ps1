@@ -303,6 +303,127 @@ Assert-ValidJson  "bad input returns JSON"  $out3
 $obj3 = Get-ToolOutput $out3
 Assert-True       "bad JSON returns error"  ($null -ne $obj3.error)
 
+# ── Invoke-HttpRequest ────────────────────────────────────────────────────────
+Start-Suite "Invoke-HttpRequest"
+Test-ToolSchema "Invoke-HttpRequest"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "Invoke-HttpRequest" @{ Uri = "https://httpbin.org/get" }
+    Assert-ValidJson  "returns valid JSON"           $out
+    Assert-NoError    "no error for valid URL"        $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has StatusCode"    $obj "StatusCode"
+    Assert-HasKey     "has Content"       $obj "Content"
+    Assert-Equal      "status 200"  200  $obj.StatusCode
+
+    $out2 = Invoke-Tool "Invoke-HttpRequest" @{
+        Uri    = "https://httpbin.org/post"
+        Method = "POST"
+        Body   = '{"test":1}'
+    }
+    Assert-ValidJson  "POST returns JSON"  $out2
+    $obj2 = Get-ToolOutput $out2
+    Assert-Equal      "POST status 200"  200  $obj2.StatusCode
+
+    $out3 = Invoke-Tool "Invoke-HttpRequest" @{ Uri = "https://this-host-does-not-exist-xyzabc.invalid" }
+    Assert-ValidJson  "bad URL returns JSON"  $out3
+    $obj3 = Get-ToolOutput $out3
+    Assert-True       "bad URL has error"  ($null -ne $obj3.error)
+}
+
+# ── Test-NetworkHost ──────────────────────────────────────────────────────────
+Start-Suite "Test-NetworkHost"
+Test-ToolSchema "Test-NetworkHost"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "Test-NetworkHost" @{ Hostname = "localhost" }
+    Assert-ValidJson  "returns valid JSON"        $out
+    Assert-NoError    "no error for localhost"     $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has Reachable"    $obj "Reachable"
+    Assert-HasKey     "has DnsResolved"  $obj "DnsResolved"
+    Assert-True       "localhost resolves"  ($obj.DnsResolved -eq $true)
+
+    $out2 = Invoke-Tool "Test-NetworkHost" @{ Hostname = "localhost"; Port = 65534 }
+    Assert-ValidJson  "port check returns JSON"  $out2
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "has PortOpen field"   ($null -ne $obj2.PortOpen -or $obj2.PortOpen -eq $false)
+
+    $out3 = Invoke-Tool "Test-NetworkHost" @{ Hostname = "this-host-does-not-exist-xyzabc.invalid" }
+    Assert-ValidJson  "bad host returns JSON"  $out3
+    $obj3 = Get-ToolOutput $out3
+    Assert-True       "bad host not resolved"  ($obj3.DnsResolved -eq $false)
+}
+
+# ── Get-NetworkAdapters ───────────────────────────────────────────────────────
+Start-Suite "Get-NetworkAdapters"
+Test-ToolSchema "Get-NetworkAdapters"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "Get-NetworkAdapters"
+    Assert-ValidJson  "returns valid JSON"    $out
+    Assert-NoError    "no error"              $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has AdapterCount"  $obj "AdapterCount"
+    Assert-HasKey     "has Adapters"      $obj "Adapters"
+    Assert-True       "at least one adapter"  ($obj.AdapterCount -ge 1)
+}
+
+# ── Get-DiskInfo ──────────────────────────────────────────────────────────────
+Start-Suite "Get-DiskInfo"
+Test-ToolSchema "Get-DiskInfo"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "Get-DiskInfo"
+    Assert-ValidJson  "returns valid JSON"  $out
+    Assert-NoError    "no error"            $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has DriveCount"  $obj "DriveCount"
+    Assert-HasKey     "has Drives"      $obj "Drives"
+    Assert-True       "at least one drive"   ($obj.DriveCount -ge 1)
+    $first = if ($obj.Drives -is [array]) { $obj.Drives[0] } else { $obj.Drives }
+    Assert-True       "first drive has TotalGB > 0"  ($first.TotalGB -gt 0)
+}
+
+# ── Get-FileHash ──────────────────────────────────────────────────────────────
+Start-Suite "Get-FileHash"
+Test-ToolSchema "Get-FileHash"
+if (-not $SchemaOnly) {
+    $tmpFile = [IO.Path]::GetTempFileName()
+    "matrix hash test" | Set-Content $tmpFile -Encoding UTF8
+
+    $out = Invoke-Tool "Get-FileHash" @{ Path = $tmpFile }
+    Assert-ValidJson  "returns valid JSON"  $out
+    Assert-NoError    "no error"            $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has Hash"       $obj "Hash"
+    Assert-HasKey     "has Algorithm"  $obj "Algorithm"
+    Assert-HasKey     "has SizeBytes"  $obj "SizeBytes"
+    Assert-True       "Hash is 64 hex chars (SHA256)"  ($obj.Hash -match '^[0-9A-F]{64}$')
+    Assert-Equal      "Algorithm is SHA256"  "SHA256"  $obj.Algorithm
+
+    $out2 = Invoke-Tool "Get-FileHash" @{ Path = $tmpFile; Algorithm = "MD5" }
+    $obj2 = Get-ToolOutput $out2
+    Assert-Equal      "MD5 algorithm"  "MD5"  $obj2.Algorithm
+    Assert-True       "MD5 is 32 hex chars"  ($obj2.Hash -match '^[0-9A-F]{32}$')
+
+    $out3 = Invoke-Tool "Get-FileHash" @{ Path = (Join-Path ([IO.Path]::GetTempPath()) "matrix-no-file-hash-xyz.txt") }
+    Assert-ValidJson  "missing file returns JSON"  $out3
+    $obj3 = Get-ToolOutput $out3
+    Assert-True       "missing file has error"  ($null -ne $obj3.error)
+
+    Remove-Item $tmpFile -Force -EA SilentlyContinue
+}
+
+# ── Get-ActiveConnections ─────────────────────────────────────────────────────
+Start-Suite "Get-ActiveConnections"
+Test-ToolSchema "Get-ActiveConnections"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "Get-ActiveConnections"
+    Assert-ValidJson  "returns valid JSON"      $out
+    Assert-NoError    "no error"                $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has ConnectionCount"  $obj "ConnectionCount"
+    Assert-HasKey     "has Connections"      $obj "Connections"
+    Assert-True       "ConnectionCount is non-negative"  ($obj.ConnectionCount -ge 0)
+}
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 $failed = Show-TestSummary
 exit $failed
