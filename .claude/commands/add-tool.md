@@ -4,33 +4,21 @@ User request: **$ARGUMENTS**
 
 ---
 
-## Step 1 — Identify the target variant
-
-Ask (or infer from context) which Matrix variant to add the tool to:
-- **matrix.ps1** (PowerShell) at `/Users/layne/projects/matrix.ps1/tools/`
-- **matrix.py** (Python) at `/Users/layne/projects/matrix/tools/`
-
-If ambiguous, default to **matrix.ps1**.
-
----
-
-## Step 2 — Design the tool interface
+## Step 1 — Design the tool interface
 
 Before writing code, confirm:
-- **Tool name**: PascalCase verb-noun for PS1 (`Get-Weather`), snake_case for Python (`get_weather`)
+- **Tool name**: PascalCase verb-noun (`Get-Weather`, `Invoke-Math`, `Convert-Units`)
 - **Parameters**: name, type, required/optional, description
 - **Output fields**: what JSON keys are returned on success
 - **Error cases**: what inputs should return `{ error: "..." }`
-- **Platform differences**: anything OS-specific?
-- **External dependencies**: network calls? system commands? timeout needed?
+- **Platform differences**: anything OS-specific? Use `$IsWindows`/`$IsMacOS`/`$IsLinux`
+- **External dependencies**: network calls need `-TimeoutSec 15` and `try/catch`
 
 ---
 
-## Step 3 — Create the tool
+## Step 2 — Create the tool
 
-### PowerShell (matrix.ps1)
-
-Write to `/Users/layne/projects/matrix.ps1/tools/<ToolName>.ps1`:
+Write to `/Users/layne/projects/matrix/tools/<ToolName>.ps1`:
 
 ```powershell
 <#
@@ -62,77 +50,67 @@ try {
 }
 ```
 
-**Non-negotiable rules:**
-- `[CmdletBinding()]` — required for schema discovery
-- `.PARAMETER` doc for every `[Parameter(Mandatory)]` — tested by CI
-- All output is compact JSON — never `Write-Host`
+**Non-negotiable rules (all enforced by CI):**
+- `[CmdletBinding()]` — required for AST schema discovery
+- `.PARAMETER` doc for every `[Parameter(Mandatory)]` — tested by `Test-ToolSchema`
+- All output is compact JSON — never `Write-Host` (output goes to the model)
 - All logic inside `try/catch` returning `@{ error = "..." }`
-- `-TimeoutSec 15` on all external calls
+- `-TimeoutSec 15` on all external calls (no hanging agent)
 - `-Depth 3 -Compress` on all `ConvertTo-Json`
+- Return `@{ error = "..." }` on bad input — do not throw
 
-### Python (matrix.py)
-
-Write to `/Users/layne/projects/matrix/tools/<tool_name>.py`:
-
-```python
-"""One sentence: what this tool does."""
-
-def run(param_name: str, optional_param: int = 10) -> dict:
-    """
-    Args:
-        param_name: What this parameter means.
-        optional_param: Optional description.
-    Returns JSON-serializable dict.
-    """
-    try:
-        # implementation
-        return {"result": "value"}
-    except Exception as e:
-        return {"error": str(e)}
-```
+**Security checklist:**
+- [ ] Validate path args with `Test-Path` or resolve to prevent traversal
+- [ ] Never `Invoke-Expression` on user input — use `& $exe @args` array form
+- [ ] Do not log secrets/tokens to err.log
 
 ---
 
-## Step 4 — Write tests (PowerShell only)
+## Step 3 — Write tests
 
-Add a test block to `/Users/layne/projects/matrix.ps1/tests/Test-Tools.ps1`:
+Add a test block to `/Users/layne/projects/matrix/tests/Test-Tools.ps1`:
 
 ```powershell
 # ── <ToolName> ────────────────────────────────────────────────────────────────
 Start-Suite "<ToolName>"
 Test-ToolSchema "<ToolName>"
-$out = Invoke-Tool "<ToolName>" @{ ParamName = "valid-value" }
-Assert-ValidJson  "returns valid JSON"         $out
-Assert-NoError    "no error on valid input"    $out
-$obj = Get-ToolOutput $out
-Assert-HasKey     "has Result field"   $obj   "Result"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "<ToolName>" @{ ParamName = "valid-value" }
+    Assert-ValidJson  "returns valid JSON"         $out
+    Assert-NoError    "no error on valid input"    $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has Result field"           $obj "Result"
 
-# Error case
-$out2 = Invoke-Tool "<ToolName>" @{ ParamName = "invalid" }
-$obj2 = Get-ToolOutput $out2
-Assert-True       "bad input returns error"    ($null -ne $obj2.error)
+    # Error case
+    $out2 = Invoke-Tool "<ToolName>" @{ ParamName = "invalid" }
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "bad input returns error"    ($null -ne $obj2.error)
+}
 ```
 
-Wrap network-dependent tests in `if (-not $SchemaOnly) { ... }`.
+Wrap ALL live/network calls in `if (-not $SchemaOnly) { ... }`.
 
 ---
 
-## Step 5 — Run tests
+## Step 4 — Run tests
 
 ```powershell
-pwsh /Users/layne/projects/matrix.ps1/tests/Run-Tests.ps1 -SchemaOnly
+pwsh /Users/layne/projects/matrix/tests/Run-Tests.ps1 -SchemaOnly
 ```
 
 All tests must pass before moving on. Fix any failures.
 
 ---
 
-## Step 6 — Report results
+## Step 5 — Report results
 
 Summarize:
-- Tool path created
+- Tool file created at `tools/<ToolName>.ps1`
 - Parameters (name → type, required?)
-- Output fields
+- Output fields on success
 - Error handling behavior
-- Tests added
+- Tests added to `Test-Tools.ps1`
 - How to hot-load: type `reload` inside the Matrix REPL
+
+**The new tool is auto-discovered on the next message — no restart needed.**
+Type `tools` in the REPL to confirm it appears in the list.

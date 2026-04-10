@@ -117,6 +117,9 @@ Type `reload` in the REPL — the tool is live immediately, no restart.
 | Command | Action |
 |---------|--------|
 | `reload` | Rescan `tools/` and register new tools |
+| `clear` | Reset conversation history |
+| `tools` | List loaded tools with descriptions |
+| `help` | Show all commands |
 | `exit` / `quit` | Exit |
 
 ## Configuration
@@ -133,12 +136,17 @@ $env:MATRIX_HOME = "/opt/matrix"
 Or edit `~/.matrix/config.json`:
 ```json
 {
-  "Provider":     "Ollama",
   "Model":        "gemma4:latest",
   "Endpoint":     "http://localhost:11434/api/chat",
-  "SystemPrompt": "You are Matrix..."
+  "SystemPrompt": "You are Matrix...",
+  "NumCtx":       0,
+  "MaxTokens":    100000,
+  "SummarizeAt":  75000,
+  "MaxDepth":     10
 }
 ```
+
+All fields are optional. `NumCtx = 0` means auto-calculate context size from message + tool schema sizes.
 
 ## Windows
 

@@ -12,29 +12,32 @@ param(
 
 try {
     $url = if ($IPAddress) {
-        "https://ipapi.co/$IPAddress/json/"
+        "https://ipinfo.io/$IPAddress/json"
     } else {
-        "https://ipapi.co/json/"
+        "https://ipinfo.io/json"
     }
 
-    $data = Invoke-RestMethod -Uri $url -TimeoutSec 10 -ErrorAction Stop
+    $data = Invoke-RestMethod -Uri $url -TimeoutSec 15 -ErrorAction Stop
 
     if ($data.error) {
-        return @{ error = $data.reason } | ConvertTo-Json -Compress
+        return @{ error = $data.error.message } | ConvertTo-Json -Compress
     }
+
+    # loc is "lat,lon" — split for convenience
+    $lat, $lon = if ($data.loc) { $data.loc -split ',' } else { $null, $null }
 
     return @{
         IP          = $data.ip
         City        = $data.city
         Region      = $data.region
-        Country     = $data.country_name
-        CountryCode = $data.country_code
+        Country     = $data.country
         Postal      = $data.postal
-        Latitude    = $data.latitude
-        Longitude   = $data.longitude
+        Latitude    = $lat
+        Longitude   = $lon
         Timezone    = $data.timezone
         ISP         = $data.org
-    } | ConvertTo-Json -Compress
+        Hostname    = $data.hostname
+    } | ConvertTo-Json -Depth 3 -Compress
 } catch {
     return @{ error = "IP lookup failed: $($_.Exception.Message)" } | ConvertTo-Json -Compress
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-commit hook: runs matrix.ps1 schema tests before any git commit.
+# Pre-commit hook: runs Matrix schema tests before any git commit.
 # Blocks the commit (exit 2) if tests fail.
 # Claude Code fires this before every Bash tool call; the script only acts on commits.
 
@@ -13,9 +13,9 @@ if ! echo "$COMMAND" | grep -qE 'git\s+commit'; then
     exit 0
 fi
 
-# Find the matrix.ps1 tests directory
+# Find the matrix tests directory
 MATRIX_DIR=""
-for candidate in "/Users/layne/projects/matrix.ps1" "$HOME/.matrix" "$(pwd)"; do
+for candidate in "/Users/layne/projects/matrix" "$HOME/.matrix" "$(pwd)"; do
     if [[ -f "$candidate/tests/Run-Tests.ps1" ]]; then
         MATRIX_DIR="$candidate"
         break
@@ -23,11 +23,11 @@ for candidate in "/Users/layne/projects/matrix.ps1" "$HOME/.matrix" "$(pwd)"; do
 done
 
 if [[ -z "$MATRIX_DIR" ]]; then
-    echo "  [pre-commit] matrix.ps1 tests not found — skipping test gate" >&2
+    echo "  [pre-commit] Matrix tests not found — skipping test gate" >&2
     exit 0
 fi
 
-echo "  [pre-commit] Running matrix.ps1 schema tests before commit..." >&2
+echo "  [pre-commit] Running Matrix schema tests before commit..." >&2
 
 if pwsh -NoProfile -ExecutionPolicy Bypass \
        -File "$MATRIX_DIR/tests/Run-Tests.ps1" -SchemaOnly 2>&1; then
