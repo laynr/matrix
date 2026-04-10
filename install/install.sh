@@ -6,7 +6,7 @@
 # to install.pwsh.ps1 which runs identically on all platforms.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/laynr/matrix/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/laynr/matrix/main/install/install.sh | sh
 
 set -e
 

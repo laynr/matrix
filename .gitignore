@@ -1,8 +1,17 @@
 config.json
 *.log
+err.log
+.DS_Store
+
+# Generated agent output (files created by running Matrix)
+*_output.txt
+*_report.txt
+*_summary.txt
+next-session-prompt.md
+
+# IDE / AI assistant directories
 .gemini/
 .agents/
 .agent/
 _agents/
 _agent/
-err.log

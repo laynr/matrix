@@ -95,7 +95,7 @@ function Invoke-AgentConversation {
                     $result.ToolsCalled[$i].function.name
                 } else { "unknown" }
                 Add-Message -Role $tr.role -Content $tr.content
-                $obj = $tr.content | ConvertFrom-Json -EA SilentlyContinue
+                try { $obj = $tr.content | ConvertFrom-Json -EA Stop } catch { $obj = $null }
                 if ($obj -and $obj.error) { $toolErrors.Add("${tcN}: $($obj.error)") }
             }
             $depth++
@@ -183,21 +183,88 @@ Start-Suite "Live agent — per-tool"
 # Targeted prompts chosen to reliably elicit a tool call with minimal args.
 $tmpFile = [IO.Path]::GetTempPath() + "matrix_test_$([int](Get-Date -UFormat %s)).txt"
 $ToolPrompts = @{
-    'Get-Time'             = "What time is it right now?"
-    'Get-SystemInfo'       = "What are the CPU load and memory stats on this machine?"
-    'Get-Weather'          = "What is the current weather in Honolulu, Hawaii?"
-    'Get-WikipediaSummary' = "Give me a Wikipedia summary of the PowerShell programming language."
-    'Invoke-Math'          = "What is 17 multiplied by 23?"
-    'Read-File'            = "Read the file at: $($global:MatrixRoot)/README.md"
-    'Write-FileContent'    = "Write the text 'Matrix per-tool test' to the file: $tmpFile"
-    'Find-Files'           = "Find all .ps1 files in the directory: $($global:MatrixRoot)/tools"
-    'Get-WebContent'       = "Fetch the content from https://example.com"
-    'Get-ProcessList'      = "List the top 5 running processes by memory usage."
-    'Invoke-ShellCommand'  = "Run this shell command and show the output: echo 'matrix ok'"
-    'Get-EnvVariable'      = "What is the value of the PATH environment variable?"
-    'Get-IPInfo'           = "What is my current public IP address?"
-    'Convert-Units'        = "Convert 100 kilometers to miles."
-    'Convert-DataFormat'   = "Convert this CSV to JSON: name,age`nAlice,30`nBob,25"
+    # ── Core / always-reliable ────────────────────────────────────────────────
+    'Get-Time'              = "What time is it right now?"
+    'Get-SystemInfo'        = "What are the CPU load and memory stats on this machine?"
+    'Get-Weather'           = "What is the current weather in Honolulu, Hawaii?"
+    'Get-WikipediaSummary'  = "Give me a Wikipedia summary of the PowerShell programming language."
+    'Invoke-Math'           = "What is 17 multiplied by 23?"
+    'Read-File'             = "Read the file at: $($global:MatrixRoot)/README.md"
+    'Write-FileContent'     = "Write the text 'Matrix per-tool test' to the file: $tmpFile"
+    'Find-Files'            = "Find all .ps1 files in the directory: $($global:MatrixRoot)/tools"
+    'Get-WebContent'        = "Fetch the content from https://example.com"
+    'Get-ProcessList'       = "List the top 5 running processes by memory usage."
+    'Get-EnvVariable'       = "What is the value of the PATH environment variable?"
+    'Get-IPInfo'            = "What is my current public IP address?"
+    'Convert-Units'         = "Convert 100 kilometers to miles."
+    'Convert-DataFormat'    = "Convert this CSV to JSON: name,age`nAlice,30`nBob,25"
+
+    # ── Encoding / hashing ────────────────────────────────────────────────────
+    'ConvertTo-Base64'      = "Encode the text 'hello world' to Base64."
+    'ConvertFrom-Base64'    = "Decode this Base64 string back to plain text: aGVsbG8gd29ybGQ="
+    'Get-FileHash'          = "Get the SHA256 hash of the file: $($global:MatrixRoot)/README.md"
+
+    # ── Network / web ─────────────────────────────────────────────────────────
+    'Get-DnsRecord'         = "Look up the DNS A records for example.com."
+    'Get-RssFeed'           = "Fetch the latest headlines from the RSS feed at https://feeds.bbci.co.uk/news/rss.xml"
+    'Get-StockQuote'        = "Get the current stock price for AAPL."
+    'Get-CurrencyRate'      = "What is the current USD to EUR exchange rate?"
+    'Get-ActiveConnections' = "List active network connections on this machine."
+    'Get-NetworkAdapters'   = "List all network adapters on this machine."
+    'Get-CertificateInfo'   = "Check the SSL certificate details for https://example.com"
+    'Invoke-HttpRequest'    = "Make an HTTP GET request to https://httpbin.org/get"
+    'Test-NetworkHost'      = "Test if the host example.com is reachable on port 80."
+    'New-WebSession'        = "Create a new persistent web session file at $($env:TMPDIR ?? '/tmp')/matrix-session-new.json."
+    'Invoke-WebSession'     = "Fetch https://httpbin.org/get using a persistent web session stored at $($env:TMPDIR ?? '/tmp')/matrix-session.json"
+
+    # ── Disk / files ──────────────────────────────────────────────────────────
+    'Get-DiskInfo'          = "Show disk usage information for this machine."
+    'Get-DirectoryTree'     = "Show the directory tree for: $($global:MatrixRoot)/lib"
+    'Copy-FileItem'         = "Copy the file $($global:MatrixRoot)/README.md to $($env:TMPDIR ?? '/tmp')/matrix-copy-readme.md"
+    'Move-FileItem'         = "Move the file $($env:TMPDIR ?? '/tmp')/matrix-move-src.txt to $($env:TMPDIR ?? '/tmp')/matrix-move-dst.txt."
+    'Sort-FileItems'        = "Group the files in $($global:MatrixRoot)/lib into subfolders by file extension."
+    'New-ZipArchive'        = "Create a zip archive of $($global:MatrixRoot)/lib and save it to $($env:TMPDIR ?? '/tmp')/matrix-lib.zip."
+    'Expand-ZipArchive'     = "Extract the archive $($env:TMPDIR ?? '/tmp')/matrix-lib.zip to $($env:TMPDIR ?? '/tmp')/matrix-extract/"
+    'Compare-FileContent'   = "Compare the file $($global:MatrixRoot)/README.md with itself and report if they are identical."
+    'Edit-FileContent'      = "In the file $($env:TMPDIR ?? '/tmp')/matrix-edit-test.txt, replace all occurrences of 'foo' with 'bar'."
+
+    # ── Text / regex ──────────────────────────────────────────────────────────
+    'Get-RegexMatches'      = "Find all numbers in this text: 'There are 42 items and 7 categories'"
+    'Invoke-TextTemplate'   = "Fill the template 'Hello {{name}}, you have {{count}} messages.' with name=Alice and count=5."
+
+    # ── Crypto / secrets ──────────────────────────────────────────────────────
+    'New-SecureToken'       = "Generate a secure random token."
+    'Protect-String'        = "Encrypt the text 'hello matrix' using the password 'testpass123'."
+    'Unprotect-String'      = "Decrypt this AES-encrypted ciphertext 'SGVsbG8gTWF0cml4' using the password 'testpass123'."
+
+    # ── Clipboard ─────────────────────────────────────────────────────────────
+    'Get-ClipboardContent'  = "What text is currently on the clipboard?"
+    'Set-ClipboardContent'  = "Set the clipboard text to 'Matrix per-tool test'."
+
+    # ── System / processes / services ─────────────────────────────────────────
+    'Get-ServiceList'       = "List all running services on this machine."
+    'Get-EventLogEntries'   = "Show the last 5 system log entries."
+    'Get-ScheduledTaskList' = "List all scheduled tasks on this machine."
+
+    # ── Office / documents ────────────────────────────────────────────────────
+    'Write-DocxFile'        = "Create a Word document at $($env:TMPDIR ?? '/tmp')/matrix-test.docx with the paragraph 'Hello from Matrix'."
+    'Read-DocxFile'         = "Read the Word document at: $($env:TMPDIR ?? '/tmp')/matrix-test.docx"
+    'Write-XlsxFile'        = "Write a spreadsheet to $($env:TMPDIR ?? '/tmp')/matrix-test.xlsx with rows: [{Name:'Alice',Age:30},{Name:'Bob',Age:25}]."
+    'Read-XlsxFile'         = "Read the spreadsheet at: $($env:TMPDIR ?? '/tmp')/matrix-test.xlsx"
+    'Write-PdfFile'         = "Create a PDF at $($env:TMPDIR ?? '/tmp')/matrix-test.pdf with the lines 'Hello World' and 'Matrix Agent'."
+    'Read-PdfFile'          = "Read the PDF document at: $($env:TMPDIR ?? '/tmp')/matrix-test.pdf"
+    'Write-PptxFile'        = "Create a PowerPoint at $($env:TMPDIR ?? '/tmp')/matrix-test.pptx with one slide titled 'Matrix Introduction'."
+    'Read-PptxFile'         = "Read the PowerPoint presentation at: $($env:TMPDIR ?? '/tmp')/matrix-test.pptx"
+
+    # ── Images ────────────────────────────────────────────────────────────────
+    'Get-ImageMetadata'     = "Get the EXIF metadata for the image at: $($env:TMPDIR ?? '/tmp')/matrix-test.jpg"
+    'Search-Images'         = "Search for images of 'sunset over ocean' online."
+    'Sort-ImageFiles'       = "Organize the image files in $($env:TMPDIR ?? '/tmp') into date-based subfolders."
+
+    # ── Notifications / messaging ─────────────────────────────────────────────
+    'Send-SystemNotification' = "Send a system notification with title 'Matrix Test' and message 'Per-tool suite running'."
+    'Send-SlackMessage'     = "Send the Slack message 'Matrix per-tool test' to webhook URL https://hooks.slack.com/services/TEST/TEST/testtoken"
+    'Send-TeamsMessage'     = "Post a Teams message titled 'Matrix Alert' with body 'Per-tool test' to https://outlook.office.com/webhook/test"
 }
 
 $allTools    = Get-MatrixTools

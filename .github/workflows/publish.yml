@@ -29,4 +29,4 @@ jobs:
             --latest 2>/dev/null || true
 
           # Replace assets in-place — no delete/recreate window where installs 404
-          gh release upload latest matrix-release.zip install.pwsh.ps1 --clobber
+          gh release upload latest matrix-release.zip install/install.pwsh.ps1 --clobber

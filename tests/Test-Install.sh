@@ -7,7 +7,7 @@
 #   sh tests/Test-Install.sh
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-INSTALL_SH="$(cd "$SCRIPT_DIR/.." && pwd)/install.sh"
+INSTALL_SH="$(cd "$SCRIPT_DIR/.." && pwd)/install/install.sh"
 PASS=0
 FAIL=0
 

@@ -39,16 +39,16 @@ try {
             $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($resolved)
         }
     } elseif ($Url) {
-        # Extract host and port from URL
-        $uri  = [System.Uri]$Url
-        $host = $uri.Host
-        $port = if ($uri.Port -gt 0) { $uri.Port } else { 443 }
+        # Extract hostname and port from URL
+        $uri      = [System.Uri]$Url
+        $hostname = $uri.Host
+        $port     = if ($uri.Port -gt 0) { $uri.Port } else { 443 }
 
         $tc  = [System.Net.Sockets.TcpClient]::new()
-        $tc.ConnectAsync($host, $port).Wait(10000) | Out-Null
+        $tc.ConnectAsync($hostname, $port).Wait(10000) | Out-Null
         if (-not $tc.Connected) {
             $tc.Dispose()
-            return @{ error = "Could not connect to ${host}:${port}" } | ConvertTo-Json -Compress
+            return @{ error = "Could not connect to ${hostname}:${port}" } | ConvertTo-Json -Compress
         }
 
         $captureCert = $null
@@ -60,7 +60,7 @@ try {
                 $true  # always accept for inspection
             }
         )
-        $sslStream.AuthenticateAsClient($host)
+        $sslStream.AuthenticateAsClient($hostname)
         $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($captureCert)
         $sslStream.Dispose()
         $tc.Dispose()

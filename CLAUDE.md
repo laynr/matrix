@@ -31,6 +31,11 @@ lib/
   Logger.ps1            ← Write-MatrixLog → err.log (cross-platform mutex)
   GUI.ps1               ← WPF chat window (Windows only)
 tools/                  ← Drop a .ps1 here — auto-discovered on next message or reload
+install/
+  install.sh            ← Mac/Linux: sh bootstrap → installs pwsh
+  install.ps1           ← Windows: PS5 bootstrap → installs pwsh 7
+  install.pwsh.ps1      ← Shared pwsh 7 setup (Ollama, model, download release, launcher)
+  uninstall.pwsh.ps1    ← Removes ~/.matrix and the launcher
 tests/
   Test-Framework.ps1    ← Assert-*, Invoke-Tool, Test-ToolSchema
   Test-Tools.ps1        ← Unit tests: every tool (schema + live calls)

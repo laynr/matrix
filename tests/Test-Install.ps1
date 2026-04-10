@@ -20,8 +20,8 @@ $ErrorActionPreference = "Stop"
 
 $platform        = if ($IsWindows) { "Windows" } elseif ($IsMacOS) { "macOS" } else { "Linux" }
 $sourceRoot      = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$installerPath   = Join-Path $sourceRoot "install.pwsh.ps1"
-$uninstallerPath = Join-Path $sourceRoot "uninstall.pwsh.ps1"
+$installerPath   = Join-Path $sourceRoot "install" "install.pwsh.ps1"
+$uninstallerPath = Join-Path $sourceRoot "install" "uninstall.pwsh.ps1"
 $testHome        = Join-Path ([IO.Path]::GetTempPath()) "matrix-test-install-$PID"
 $testBin         = Join-Path ([IO.Path]::GetTempPath()) "matrix-test-bin-$PID"
 $stubBin         = Join-Path ([IO.Path]::GetTempPath()) "matrix-test-stubs-$PID"

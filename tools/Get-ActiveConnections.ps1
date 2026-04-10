@@ -4,10 +4,14 @@ Lists active TCP network connections with local/remote addresses, state, and pro
 
 .PARAMETER State
 Optional filter by connection state (e.g. Established, Listen, TimeWait).
+
+.PARAMETER Top
+Maximum number of connections to return. Defaults to 50.
 #>
 [CmdletBinding()]
 param(
-    [string]$State = ""
+    [string]$State = "",
+    [int]$Top      = 50
 )
 
 try {
@@ -94,9 +98,10 @@ try {
         return @{ error = "Unsupported platform." } | ConvertTo-Json -Compress
     }
 
+    $capped = @($connections | Select-Object -First $Top)
     return @{
         ConnectionCount = $connections.Count
-        Connections     = @($connections)
+        Connections     = $capped
     } | ConvertTo-Json -Depth 3 -Compress
 
 } catch {

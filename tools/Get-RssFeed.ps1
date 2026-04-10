@@ -26,23 +26,27 @@ try {
     $feedTitle = ''
     $items    = @()
 
+    # Helper: extract text from a value that may be a string or an XmlNode
+    $xt = { param($n) if ($n -is [System.Xml.XmlNode]) { $n.InnerText } else { "$n" } }
+
     if ($rootName -eq 'rss') {
         $format    = 'RSS'
-        $feedTitle = $feed.rss.channel.title
+        $feedTitle = & $xt $feed.rss.channel.title
         $rawItems  = $feed.rss.channel.item
 
         foreach ($item in $rawItems) {
             if ($items.Count -ge $MaxItems) { break }
-            $summary = if ($item.description) {
-                $s = $item.description -replace '<[^>]+>','' # strip HTML tags
+            $rawDesc = & $xt $item.description
+            $summary = if ($rawDesc) {
+                $s = $rawDesc -replace '<[^>]+>','' # strip HTML tags
                 if ($s.Length -gt 200) { $s.Substring(0,200) } else { $s }
             } else { '' }
             $items += @{
-                Title     = "$($item.title)"
-                Link      = "$($item.link)"
-                Published = "$($item.pubDate)"
+                Title     = & $xt $item.title
+                Link      = & $xt $item.link
+                Published = & $xt $item.pubDate
                 Summary   = $summary
-                Author    = "$($item.author)"
+                Author    = & $xt $item.author
             }
         }
     } elseif ($rootName -eq 'feed') {
@@ -51,7 +55,7 @@ try {
         $ns.AddNamespace('a', 'http://www.w3.org/2005/Atom')
 
         $titleNode = $feed.DocumentElement.SelectSingleNode('a:title', $ns)
-        $feedTitle = if ($titleNode) { $titleNode.InnerText } else { '' }
+        $feedTitle = if ($titleNode) { $titleNode.InnerText } else { & $xt $feed.feed.title }
 
         $entryNodes = $feed.DocumentElement.SelectNodes('a:entry', $ns)
         foreach ($entry in $entryNodes) {

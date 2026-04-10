@@ -4,7 +4,7 @@
 # install.pwsh.ps1 which handles Ollama, model, repo, and launch.
 #
 # Usage (run from Windows PowerShell 5.1):
-#   irm https://raw.githubusercontent.com/laynr/matrix/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/laynr/matrix/main/install/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
