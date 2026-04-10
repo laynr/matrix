@@ -6,6 +6,13 @@ function Get-TokenCount {
     return [math]::Ceiling($Text.Length / 3.5)
 }
 
+function Get-ContextTokenCount {
+    return ($global:MatrixMessages | ForEach-Object {
+        $c = if ($_.content -is [string]) { $_.content } else { $_.content | ConvertTo-Json -Depth 3 -Compress }
+        Get-TokenCount $c
+    } | Measure-Object -Sum).Sum
+}
+
 function Add-Message {
     param(
         [string]$Role,
@@ -69,7 +76,7 @@ function Invoke-ContextSummary {
         }
         # Rebuild: original first-user-turn + summary + recent 6 messages
         $global:MatrixMessages = @($msgs[0], $summaryMsg) + $toKeep
-        Write-Host "  [context] Summarized $($toSummarize.Count) old turns to save space." -ForegroundColor DarkGray
+        Write-Host "  [ctx] Summarized $($toSummarize.Count) earlier turns → 1 summary block." -ForegroundColor DarkGray
         Write-MatrixLog -Message "Context summarized: compressed $($toSummarize.Count) messages"
         return $true
     } catch {
@@ -83,19 +90,12 @@ function Invoke-ContextSummary {
 #   Phase B — smart prune (keep msgs[0] = first user turn, msgs[1] = second user turn, last 6)
 #             if summarization fails or is not applicable
 function Prune-Context {
-    param([int]$MaxTokens = 100000, [int]$SummarizeAt = 75000)
+    param(
+        [int]$MaxTokens  = $(if ($global:Config.MaxTokens)  { $global:Config.MaxTokens }  else { 100000 }),
+        [int]$SummarizeAt = $(if ($global:Config.SummarizeAt) { $global:Config.SummarizeAt } else { 75000 })
+    )
 
-    $total = ($global:MatrixMessages | ForEach-Object {
-        $c = if ($_.content -is [string]) { $_.content } else { $_.content | ConvertTo-Json -Depth 3 -Compress }
-        Get-TokenCount $c
-    } | Measure-Object -Sum).Sum
-
-    # Show token budget once it becomes relevant
-    if ($total -gt ($MaxTokens * 0.5)) {
-        $pct   = [math]::Round($total / $MaxTokens * 100)
-        $color = if ($pct -ge 90) { "Red" } elseif ($pct -ge 75) { "Yellow" } else { "DarkGray" }
-        Write-Host "  [context: ~$total tokens, $pct%]" -ForegroundColor $color
-    }
+    $total = Get-ContextTokenCount
 
     if ($total -lt $SummarizeAt) { return }
 
@@ -107,7 +107,7 @@ function Prune-Context {
     $msgs = $global:MatrixMessages
     if ($msgs.Count -gt 9) {
         $global:MatrixMessages = @($msgs[0], $msgs[1]) + @($msgs[($msgs.Count - 6)..($msgs.Count - 1)])
-        Write-Host "  [context] Pruned old turns (summarization unavailable)." -ForegroundColor DarkGray
+        Write-Host "  [ctx] Hard pruned — kept first turn + last 6." -ForegroundColor DarkGray
         Write-MatrixLog -Message "Context hard-pruned: kept first two user turns + last 6"
     }
 }

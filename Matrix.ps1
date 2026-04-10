@@ -114,8 +114,9 @@ if ($CLI) {
 
     function Process-AssistantMessage {
         param($assistantMsg, [int]$Depth = 0)
-        if ($Depth -ge 10) {
-            Add-UIChatMessage -Role "system" -Message "[warn] Max tool call depth reached — stopping."
+        $maxDepth = if ($global:Config.MaxDepth) { $global:Config.MaxDepth } else { 10 }
+        if ($Depth -ge $maxDepth) {
+            Add-UIChatMessage -Role "system" -Message "[warn] Max tool call depth ($maxDepth) reached — stopping."
             return
         }
         $result = Invoke-MatrixToolchain -Message $assistantMsg.message

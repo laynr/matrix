@@ -109,8 +109,9 @@ function Process-OllamaMessage {
         [int]$Depth = 0
     )
 
-    if ($Depth -ge 10) {
-        Write-Host "  [warn] Max tool call depth reached — stopping." -ForegroundColor Yellow
+    $maxDepth = if ($global:Config.MaxDepth) { $global:Config.MaxDepth } else { 10 }
+    if ($Depth -ge $maxDepth) {
+        Write-Host "  [warn] Max tool call depth ($maxDepth) reached — stopping." -ForegroundColor Yellow
         return
     }
 
