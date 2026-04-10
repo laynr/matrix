@@ -1252,6 +1252,115 @@ if (-not $SchemaOnly) {
     Remove-Item $tmpDst -Recurse -Force -EA SilentlyContinue
 }
 
+# ── New-WebSession ─────────────────────────────────────────────────────────────
+Start-Suite "New-WebSession"
+Test-ToolSchema "New-WebSession"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "New-WebSession" @{}
+    Assert-ValidJson  "returns valid JSON"   $out
+    Assert-NoError    "no error"             $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has SessionPath"  $obj "SessionPath"
+    Assert-HasKey     "has CookieCount"  $obj "CookieCount"
+    Assert-True       "session file exists"  (Test-Path $obj.SessionPath)
+    Assert-Equal      "CookieCount = 0"  0  $obj.CookieCount
+
+    $out2 = Invoke-Tool "New-WebSession" @{ BaseUrl = "https://example.com" }
+    $obj2 = Get-ToolOutput $out2
+    Assert-Equal      "BaseUrl stored"  "https://example.com"  $obj2.BaseUrl
+
+    Remove-Item $obj.SessionPath  -Force -EA SilentlyContinue
+    Remove-Item $obj2.SessionPath -Force -EA SilentlyContinue
+}
+
+# ── Invoke-WebSession ──────────────────────────────────────────────────────────
+Start-Suite "Invoke-WebSession"
+Test-ToolSchema "Invoke-WebSession"
+if (-not $SchemaOnly) {
+    # Create session first
+    $sessOut = Invoke-Tool "New-WebSession" @{}
+    $sessObj = Get-ToolOutput $sessOut
+    $sessPath = $sessObj.SessionPath
+
+    $out = Invoke-Tool "Invoke-WebSession" @{ SessionPath = $sessPath; Uri = "https://httpbin.org/get" }
+    Assert-ValidJson  "returns valid JSON"   $out
+    Assert-NoError    "no error"             $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has StatusCode"  $obj "StatusCode"
+    Assert-HasKey     "has Content"     $obj "Content"
+    Assert-Equal      "StatusCode = 200"  200  $obj.StatusCode
+
+    $out2 = Invoke-Tool "Invoke-WebSession" @{ SessionPath = (Join-Path ([IO.Path]::GetTempPath()) "no-session.json"); Uri = "https://httpbin.org/get" }
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "missing session error"  ($null -ne $obj2.error)
+
+    Remove-Item $sessPath -Force -EA SilentlyContinue
+}
+
+# ── Get-RssFeed ────────────────────────────────────────────────────────────────
+Start-Suite "Get-RssFeed"
+Test-ToolSchema "Get-RssFeed"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "Get-RssFeed" @{ Url = "https://feeds.bbci.co.uk/news/rss.xml"; MaxItems = 5 }
+    Assert-ValidJson  "returns valid JSON"  $out
+    Assert-NoError    "no error"            $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has FeedTitle"   $obj "FeedTitle"
+    Assert-HasKey     "has Format"      $obj "Format"
+    Assert-HasKey     "has Items"       $obj "Items"
+    Assert-Equal      "Format is RSS"   "RSS"  $obj.Format
+    Assert-True       "items returned"  ($obj.ItemCount -gt 0)
+}
+
+# ── Get-CurrencyRate ───────────────────────────────────────────────────────────
+Start-Suite "Get-CurrencyRate"
+Test-ToolSchema "Get-CurrencyRate"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "Get-CurrencyRate" @{ BaseCurrency = "USD" }
+    Assert-ValidJson  "returns valid JSON"     $out
+    Assert-NoError    "no error for USD base"  $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has Base"          $obj "Base"
+    Assert-HasKey     "has CurrencyCount" $obj "CurrencyCount"
+    Assert-Equal      "Base = USD"  "USD"  $obj.Base
+    Assert-True       "CurrencyCount > 0"  ($obj.CurrencyCount -gt 0)
+
+    $out2 = Invoke-Tool "Get-CurrencyRate" @{ BaseCurrency = "USD"; TargetCurrency = "EUR" }
+    Assert-NoError    "no error for EUR target"  $out2
+    $obj2 = Get-ToolOutput $out2
+    Assert-HasKey     "has Rate"  $obj2 "Rate"
+    Assert-True       "Rate is number"  ($obj2.Rate -gt 0)
+}
+
+# ── Get-StockQuote ─────────────────────────────────────────────────────────────
+Start-Suite "Get-StockQuote"
+Test-ToolSchema "Get-StockQuote"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "Get-StockQuote" @{ Symbol = "MSFT" }
+    Assert-ValidJson  "returns valid JSON"  $out
+    Assert-NoError    "no error for MSFT"  $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has Symbol"    $obj "Symbol"
+    Assert-HasKey     "has Price"     $obj "Price"
+    Assert-HasKey     "has Currency"  $obj "Currency"
+    Assert-True       "Price > 0"     ($obj.Price -gt 0)
+    Assert-True       "Currency non-empty"  (-not [string]::IsNullOrWhiteSpace($obj.Currency))
+}
+
+# ── Get-DnsRecord ──────────────────────────────────────────────────────────────
+Start-Suite "Get-DnsRecord"
+Test-ToolSchema "Get-DnsRecord"
+if (-not $SchemaOnly) {
+    $out = Invoke-Tool "Get-DnsRecord" @{ Hostname = "github.com"; Type = "A" }
+    Assert-ValidJson  "returns valid JSON"       $out
+    Assert-NoError    "no error for github.com"  $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has Hostname"     $obj "Hostname"
+    Assert-HasKey     "has Records"      $obj "Records"
+    Assert-HasKey     "has RecordCount"  $obj "RecordCount"
+    Assert-True       "RecordCount > 0"  ($obj.RecordCount -gt 0)
+}
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 $failed = Show-TestSummary
 exit $failed
