@@ -1001,6 +1001,150 @@ if (-not $SchemaOnly) {
     Assert-True       "Success is bool"  ($obj.Success -is [bool] -or $obj.Success -eq $true -or $obj.Success -eq $false)
 }
 
+# ── Edit-FileContent ──────────────────────────────────────────────────────────
+Start-Suite "Edit-FileContent"
+Test-ToolSchema "Edit-FileContent"
+if (-not $SchemaOnly) {
+    $tmpF = [IO.Path]::GetTempFileName()
+    "Hello world`nfoo bar`nfoo baz" | Set-Content $tmpF -Encoding UTF8
+    $out = Invoke-Tool "Edit-FileContent" @{ Path = $tmpF; Find = "foo"; Replace = "qux"; ReplaceAll = $true }
+    Assert-ValidJson  "returns valid JSON"         $out
+    Assert-NoError    "no error on replace"        $out
+    $obj = Get-ToolOutput $out
+    Assert-Equal      "ReplacementsCount = 2"  2   $obj.ReplacementsCount
+    $content = Get-Content $tmpF -Raw
+    Assert-True       "replacements applied"   ($content -match 'qux bar')
+
+    $out2 = Invoke-Tool "Edit-FileContent" @{ Path = $tmpF; Find = "nomatch"; Replace = "x" }
+    $obj2 = Get-ToolOutput $out2
+    Assert-Equal      "no match returns 0"  0  $obj2.ReplacementsCount
+
+    $out3 = Invoke-Tool "Edit-FileContent" @{ Path = $tmpF; Find = "q\w+"; Replace = "Z"; UseRegex = $true; ReplaceAll = $true }
+    Assert-NoError    "regex mode no error"  $out3
+    $obj3 = Get-ToolOutput $out3
+    Assert-True       "regex replacements > 0"  ($obj3.ReplacementsCount -gt 0)
+
+    Remove-Item $tmpF -Force -EA SilentlyContinue
+}
+
+# ── Move-FileItem ──────────────────────────────────────────────────────────────
+Start-Suite "Move-FileItem"
+Test-ToolSchema "Move-FileItem"
+if (-not $SchemaOnly) {
+    $tmpSrc = [IO.Path]::GetTempFileName()
+    $tmpDst = [IO.Path]::GetTempFileName(); Remove-Item $tmpDst -Force
+    "move me" | Set-Content $tmpSrc -Encoding UTF8
+    $out = Invoke-Tool "Move-FileItem" @{ Source = $tmpSrc; Destination = $tmpDst }
+    Assert-ValidJson  "returns valid JSON"      $out
+    Assert-NoError    "no error on move"        $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has Source"       $obj "Source"
+    Assert-HasKey     "has Destination"  $obj "Destination"
+    Assert-True       "source gone"      (-not (Test-Path $tmpSrc))
+    Assert-True       "dest exists"      (Test-Path $tmpDst)
+
+    $out2 = Invoke-Tool "Move-FileItem" @{ Source = $tmpSrc; Destination = $tmpDst }
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "missing source returns error"  ($null -ne $obj2.error)
+
+    Remove-Item $tmpDst -Force -EA SilentlyContinue
+}
+
+# ── Compare-FileContent ────────────────────────────────────────────────────────
+Start-Suite "Compare-FileContent"
+Test-ToolSchema "Compare-FileContent"
+if (-not $SchemaOnly) {
+    $tmpA = [IO.Path]::GetTempFileName()
+    $tmpB = [IO.Path]::GetTempFileName()
+    "line1`nline2`nline3" | Set-Content $tmpA -Encoding UTF8
+    "line1`nline4`nline3" | Set-Content $tmpB -Encoding UTF8
+    $out = Invoke-Tool "Compare-FileContent" @{ PathA = $tmpA; PathB = $tmpB }
+    Assert-ValidJson  "returns valid JSON"    $out
+    Assert-NoError    "no error"              $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has AreSame"      $obj "AreSame"
+    Assert-HasKey     "has AddedCount"   $obj "AddedCount"
+    Assert-HasKey     "has RemovedCount" $obj "RemovedCount"
+    Assert-True       "files differ"     (-not $obj.AreSame)
+
+    # Identical files
+    $out2 = Invoke-Tool "Compare-FileContent" @{ PathA = $tmpA; PathB = $tmpA }
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "identical files AreSame"  ($obj2.AreSame -eq $true)
+
+    Remove-Item $tmpA,$tmpB -Force -EA SilentlyContinue
+}
+
+# ── Sort-FileItems ─────────────────────────────────────────────────────────────
+Start-Suite "Sort-FileItems"
+Test-ToolSchema "Sort-FileItems"
+if (-not $SchemaOnly) {
+    $tmpDir = Join-Path ([IO.Path]::GetTempPath()) "matrix-sort-$(New-Guid)"
+    New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+    'a' | Set-Content (Join-Path $tmpDir "file.txt")  -Encoding UTF8
+    'b' | Set-Content (Join-Path $tmpDir "file.ps1")  -Encoding UTF8
+    'c' | Set-Content (Join-Path $tmpDir "file.json") -Encoding UTF8
+    $out = Invoke-Tool "Sort-FileItems" @{ Path = $tmpDir; GroupBy = "Extension" }
+    Assert-ValidJson  "returns valid JSON"        $out
+    Assert-NoError    "no error"                  $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has FilesProcessed" $obj "FilesProcessed"
+    Assert-HasKey     "has Groups"         $obj "Groups"
+    Assert-Equal      "FilesProcessed = 3"  3   $obj.FilesProcessed
+    Remove-Item $tmpDir -Recurse -Force -EA SilentlyContinue
+}
+
+# ── Read-PptxFile ──────────────────────────────────────────────────────────────
+Start-Suite "Read-PptxFile"
+Test-ToolSchema "Read-PptxFile"
+if (-not $SchemaOnly) {
+    $tmpPptx = [IO.Path]::GetTempFileName() -replace '\.tmp$','.pptx'
+    $writeOut = Invoke-Tool "Write-PptxFile" @{
+        Path = $tmpPptx
+        Slides = @(@{ Title = "Slide One"; Content = "Body text here" }, @{ Title = "Slide Two"; Content = "More content" })
+        Overwrite = $true
+    }
+    Assert-NoError "write succeeded for read test"  $writeOut
+
+    $out = Invoke-Tool "Read-PptxFile" @{ Path = $tmpPptx }
+    Assert-ValidJson  "returns valid JSON"   $out
+    Assert-NoError    "no error reading"     $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has SlideCount"  $obj "SlideCount"
+    Assert-HasKey     "has Slides"      $obj "Slides"
+    Assert-Equal      "SlideCount = 2"  2   $obj.SlideCount
+
+    $out2 = Invoke-Tool "Read-PptxFile" @{ Path = (Join-Path ([IO.Path]::GetTempPath()) "no-such.pptx") }
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "missing file has error"  ($null -ne $obj2.error)
+    Remove-Item $tmpPptx -Force -EA SilentlyContinue
+}
+
+# ── Write-PptxFile ─────────────────────────────────────────────────────────────
+Start-Suite "Write-PptxFile"
+Test-ToolSchema "Write-PptxFile"
+if (-not $SchemaOnly) {
+    $tmpPptx = [IO.Path]::GetTempFileName() -replace '\.tmp$','.pptx'
+    Remove-Item $tmpPptx -Force -EA SilentlyContinue
+    $out = Invoke-Tool "Write-PptxFile" @{
+        Path   = $tmpPptx
+        Slides = @("First slide text", "Second slide text")
+    }
+    Assert-ValidJson  "returns valid JSON"   $out
+    Assert-NoError    "no error"             $out
+    $obj = Get-ToolOutput $out
+    Assert-HasKey     "has SlideCount"  $obj "SlideCount"
+    Assert-HasKey     "has SizeBytes"   $obj "SizeBytes"
+    Assert-Equal      "SlideCount = 2"  2    $obj.SlideCount
+    Assert-True       "file created"    (Test-Path $tmpPptx)
+    Assert-True       "size > 0"        ($obj.SizeBytes -gt 0)
+
+    $out2 = Invoke-Tool "Write-PptxFile" @{ Path = $tmpPptx; Slides = @("x") }
+    $obj2 = Get-ToolOutput $out2
+    Assert-True       "overwrite guard returns error"  ($null -ne $obj2.error)
+    Remove-Item $tmpPptx -Force -EA SilentlyContinue
+}
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 $failed = Show-TestSummary
 exit $failed
