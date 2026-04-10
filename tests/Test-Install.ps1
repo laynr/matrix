@@ -1,7 +1,10 @@
 #!/usr/bin/env pwsh
 # Install / Uninstall integration tests.
-# Verifies that Matrix can be correctly deployed to a target directory,
-# that the installed layout works, and that uninstall cleans up completely.
+# Verifies the full lifecycle in the correct order:
+#   1. Uninstall (pre-install) — must be idempotent / graceful when nothing exists
+#   2. Install                 — deploy files, write config, create launcher
+#   3. Smoke test              — installed libs load, tools are discoverable
+#   4. Uninstall (post-install)— removes everything the install laid down
 #
 # ORDER MATTERS — this suite must run BEFORE Tool and MultiTool tests.
 # Run-Tests.ps1 enforces this automatically.
@@ -11,17 +14,50 @@ param([switch]$SchemaOnly)   # accepted for runner compatibility; all install te
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "Test-Framework.ps1")
 
-$platform   = if ($IsWindows) { "Windows" } elseif ($IsMacOS) { "macOS" } else { "Linux" }
-$sourceRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$testHome   = Join-Path ([IO.Path]::GetTempPath()) "matrix-test-install-$PID"
-$testBin    = Join-Path ([IO.Path]::GetTempPath()) "matrix-test-bin-$PID"
+$platform        = if ($IsWindows) { "Windows" } elseif ($IsMacOS) { "macOS" } else { "Linux" }
+$sourceRoot      = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$testHome        = Join-Path ([IO.Path]::GetTempPath()) "matrix-test-install-$PID"
+$testBin         = Join-Path ([IO.Path]::GetTempPath()) "matrix-test-bin-$PID"
+$uninstallerPath = Join-Path $sourceRoot "uninstall.pwsh.ps1"
 
-Write-Host "  Platform    : $platform"   -ForegroundColor DarkGray
-Write-Host "  Source      : $sourceRoot" -ForegroundColor DarkGray
-Write-Host "  Install dir : $testHome"   -ForegroundColor DarkGray
-Write-Host "  Bin dir     : $testBin"    -ForegroundColor DarkGray
+# Launcher path is platform-specific (mirrors install.pwsh.ps1 Step 5)
+$script:launcher = if ($IsWindows) { Join-Path $testBin "matrix.ps1" } else { Join-Path $testBin "matrix" }
 
-# ── Install ───────────────────────────────────────────────────────────────────
+Write-Host "  Platform    : $platform"         -ForegroundColor DarkGray
+Write-Host "  Source      : $sourceRoot"       -ForegroundColor DarkGray
+Write-Host "  Install dir : $testHome"         -ForegroundColor DarkGray
+Write-Host "  Bin dir     : $testBin"          -ForegroundColor DarkGray
+
+# Helper: run the uninstaller pointed at our test dirs
+function Invoke-TestUninstaller {
+    $env:MATRIX_HOME    = $testHome
+    $env:MATRIX_BIN_DIR = $testBin
+    try {
+        pwsh -NoProfile -ExecutionPolicy Bypass -File $uninstallerPath -Quiet 2>&1 | Out-Null
+        return $LASTEXITCODE
+    } finally {
+        Remove-Item Env:MATRIX_HOME    -ErrorAction SilentlyContinue
+        Remove-Item Env:MATRIX_BIN_DIR -ErrorAction SilentlyContinue
+    }
+}
+
+# ── 1. Pre-install uninstall — must succeed even when nothing exists ───────────
+Start-Suite "Pre-install cleanup [$platform]"
+
+Assert-True "uninstall.pwsh.ps1 exists" (Test-Path $uninstallerPath)
+
+try {
+    # Neither $testHome nor $testBin exist yet — uninstaller must handle this gracefully
+    $exitCode = Invoke-TestUninstaller
+    Assert-True "uninstaller is idempotent on missing dirs" ($exitCode -eq 0)
+} catch {
+    Add-Result -Test "uninstaller runs cleanly on missing dirs" -Passed $false -Detail "$_"
+}
+
+Assert-True "install dir absent before install" (-not (Test-Path $testHome))
+Assert-True "launcher absent before install"    (-not (Test-Path $script:launcher))
+
+# ── 2. Install ─────────────────────────────────────────────────────────────────
 Start-Suite "Install [$platform]"
 
 try {
@@ -44,17 +80,14 @@ try {
     # Create platform-specific launcher (mirrors install.pwsh.ps1 Step 5)
     $matrixScript = Join-Path $testHome "Matrix.ps1"
     if ($IsWindows) {
-        $script:launcher = Join-Path $testBin "matrix.ps1"
         "& `"$matrixScript`" @args" | Set-Content $script:launcher -Encoding UTF8
     } else {
-        $script:launcher = Join-Path $testBin "matrix"
         @"
 #!/usr/bin/env sh
 exec pwsh -NoProfile -ExecutionPolicy Bypass -File "$matrixScript" "`$@"
 "@ | Set-Content $script:launcher -Encoding UTF8
         chmod +x $script:launcher
     }
-
 } catch {
     Add-Result -Test "Install setup" -Passed $false -Detail "$_"
     $failed = Show-TestSummary
@@ -77,12 +110,10 @@ if (-not $IsWindows) {
     Assert-True "launcher is executable" ($executable.Trim() -eq "1")
 }
 
-# Tool count must match source exactly
 $srcCount  = @(Get-ChildItem (Join-Path $sourceRoot "tools") -Filter "*.ps1").Count
 $instCount = @(Get-ChildItem (Join-Path $testHome "tools")   -Filter "*.ps1").Count
 Assert-Equal "all $srcCount tools installed" $srcCount $instCount
 
-# Config is valid JSON with all required fields
 try {
     $cfg = Get-Content (Join-Path $testHome "config.json") -Raw | ConvertFrom-Json
     Assert-True "config.Model set"        (-not [string]::IsNullOrWhiteSpace($cfg.Model))
@@ -92,11 +123,10 @@ try {
     Add-Result -Test "config.json is valid JSON" -Passed $false -Detail "$_"
 }
 
-# ── Smoke test — installed libs load and tools are discoverable ───────────────
+# ── 3. Smoke test — installed libs load and tools are discoverable ─────────────
 Start-Suite "Installed Matrix — smoke test [$platform]"
 
 try {
-    # Run in a fresh pwsh subprocess — simulates what a real user launch does
     $safeHome = $testHome -replace "'", "''"
     $result = pwsh -NoProfile -ExecutionPolicy Bypass -Command "
         `$global:MatrixRoot = '$safeHome'
@@ -108,43 +138,29 @@ try {
     " 2>&1
 
     $toolCount = [int]($result | Where-Object { $_ -match '^\d+$' } | Select-Object -Last 1)
-
-    Assert-True  "installed libs load without error" ($toolCount -gt 0)
-    Assert-Equal "installed tool count matches source" $srcCount $toolCount
+    Assert-True  "installed libs load without error"       ($toolCount -gt 0)
+    Assert-Equal "installed tool count matches source"     $srcCount $toolCount
 } catch {
     Add-Result -Test "Smoke test" -Passed $false -Detail "$_"
 }
 
-# ── Uninstall — runs the real uninstall.pwsh.ps1 ─────────────────────────────
+# ── 4. Uninstall — removes everything the install laid down ───────────────────
 Start-Suite "Uninstall [$platform]"
 
-# Point the uninstaller at the test directories via env vars (same vars as the installer)
-$env:MATRIX_HOME    = $testHome
-$env:MATRIX_BIN_DIR = $testBin
-
-$uninstallerPath = Join-Path $sourceRoot "uninstall.pwsh.ps1"
-
 try {
-    Assert-True "uninstall.pwsh.ps1 exists" (Test-Path $uninstallerPath)
-
-    $output = pwsh -NoProfile -ExecutionPolicy Bypass -File $uninstallerPath -Quiet 2>&1
-    $exitCode = $LASTEXITCODE
+    $exitCode = Invoke-TestUninstaller
     Assert-True "uninstaller exits cleanly" ($exitCode -eq 0)
 } catch {
     Add-Result -Test "Uninstaller ran without exception" -Passed $false -Detail "$_"
-} finally {
-    # Always clear test env vars so they don't leak into subsequent test suites
-    Remove-Item Env:MATRIX_HOME    -ErrorAction SilentlyContinue
-    Remove-Item Env:MATRIX_BIN_DIR -ErrorAction SilentlyContinue
 }
 
-Assert-True "install dir gone"  (-not (Test-Path $testHome))
-Assert-True "launcher gone"     (-not (Test-Path $script:launcher))
+Assert-True "install dir gone" (-not (Test-Path $testHome))
+Assert-True "launcher gone"    (-not (Test-Path $script:launcher))
 
-# The bin directory itself is a system path and is intentionally left in place
-# by the uninstaller. Clean it up here since it was a temp dir created for this test.
+# The bin dir is a system path in real use and is left in place by the uninstaller.
+# Clean it up here since it was a temp dir created solely for this test run.
 Remove-Item $testBin -Recurse -Force -ErrorAction SilentlyContinue
-Assert-True "bin dir gone"      (-not (Test-Path $testBin))
+Assert-True "bin dir gone"     (-not (Test-Path $testBin))
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 $failed = Show-TestSummary
