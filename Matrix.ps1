@@ -84,7 +84,18 @@ function Invoke-MatrixUpdate {
     }
 }
 
-Invoke-MatrixUpdate
+$updatePS = [PowerShell]::Create()
+[void]$updatePS.AddScript({
+    param($root)
+    $global:MatrixRoot = $root
+    . (Join-Path $root "lib" "Config.ps1")
+    . (Join-Path $root "lib" "Logger.ps1")
+    Invoke-MatrixUpdate
+}).AddArgument($global:MatrixRoot)
+[void]$updatePS.BeginInvoke()
+# Fire-and-forget: update writes .version and prints a notice if a new release
+# is available. The notice may appear after the prompt — acceptable trade-off
+# for instant startup instead of a 5-second blocking network call.
 
 if ($CLI) {
     . (Join-Path $global:MatrixRoot "lib" "CLI.ps1")
