@@ -265,6 +265,128 @@ function Invoke-MatrixStreamingChat {
     return @{ error = "All $maxRetries attempts failed" }
 }
 
+# Streams a chat response from Ollama, writing tokens to a ConcurrentQueue instead of the
+# console. Designed for the GUI path: a DispatcherTimer on the UI thread drains the queue
+# and appends tokens to a live TextBlock. Checks CancelToken.Cancel between tokens so the
+# user can abort mid-stream.
+#
+# Returns: { message: { role, content, tool_calls } }
+#      or: { error: "..." }
+function Invoke-MatrixStreamingChatToQueue {
+    param(
+        [hashtable]$Config,
+        [array]    $Messages,
+        [array]    $Tools,
+        [string]   $ToolCatalog = "",
+        [System.Collections.Concurrent.ConcurrentQueue[string]]$TokenQueue,
+        [hashtable]$CancelToken   # Synchronized hashtable with key 'Cancel' = $true/$false
+    )
+
+    $systemContent = $Config.SystemPrompt
+    if ($ToolCatalog) {
+        $systemContent += "`n`nAll available tools (use tool call format for any of these):`n$ToolCatalog"
+    }
+    $messagesWithSystem = if ($systemContent) {
+        @(@{ role = "system"; content = $systemContent }) + $Messages
+    } else { $Messages }
+
+    $numCtx = Get-DynamicNumCtx -Messages $messagesWithSystem -Tools $Tools -Override ([int]$Config.NumCtx)
+    $body = @{
+        model      = $Config.Model
+        messages   = $messagesWithSystem
+        stream     = $true
+        keep_alive = -1
+        options    = @{ num_ctx = $numCtx }
+    }
+    if ($Tools -and $Tools.Count -gt 0) { $body.tools = $Tools }
+    $bodyJson = $body | ConvertTo-Json -Depth 10 -Compress
+    Write-MatrixLog -Message "REQUEST (streaming-queue): model=$($Config.Model) messages=$($messagesWithSystem.Count) num_ctx=$numCtx"
+
+    $maxRetries = 3
+    $delay      = 1
+
+    for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+        $reader    = $null
+        $httpResp  = $null
+        $reqContent= $null
+        try {
+            $client     = Get-MatrixHttpClient
+            $reqContent = [System.Net.Http.StringContent]::new(
+                $bodyJson, [Text.Encoding]::UTF8, "application/json")
+            $sw         = [System.Diagnostics.Stopwatch]::StartNew()
+            $req        = [System.Net.Http.HttpRequestMessage]::new(
+                [System.Net.Http.HttpMethod]::Post, $Config.Endpoint)
+            $req.Content = $reqContent
+            $httpResp    = $client.SendAsync(
+                $req,
+                [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead
+            ).GetAwaiter().GetResult()
+            $httpResp.EnsureSuccessStatusCode() | Out-Null
+            $reader      = [System.IO.StreamReader]::new(
+                $httpResp.Content.ReadAsStreamAsync().GetAwaiter().GetResult())
+
+            $fullContent = [System.Text.StringBuilder]::new()
+            $toolCalls   = $null
+
+            while (-not $reader.EndOfStream) {
+                if ($CancelToken -and $CancelToken.Cancel) {
+                    Write-MatrixLog -Message "Streaming cancelled by user"
+                    return @{ error = "cancelled" }
+                }
+                $line = $reader.ReadLine()
+                if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                try {
+                    $chunk = $line | ConvertFrom-Json -EA Stop
+                    $token = $chunk.message.content
+                    if ($token) {
+                        $TokenQueue.Enqueue($token)
+                        [void]$fullContent.Append($token)
+                    }
+                    if ($chunk.message.tool_calls -and -not $toolCalls) {
+                        $toolCalls = $chunk.message.tool_calls
+                        # Signal UI that tool calls are incoming via a sentinel token
+                        $TokenQueue.Enqueue([char]0x00)   # null sentinel; UI ignores it
+                    }
+                } catch {
+                    Write-MatrixLog -Level "WARN" -Message "Malformed chunk skipped: $line"
+                }
+            }
+
+            $sw.Stop()
+            $outTok  = [math]::Ceiling($fullContent.Length / 3.5)
+            $tokRate = if ($sw.Elapsed.TotalSeconds -gt 0) { [math]::Round($outTok / $sw.Elapsed.TotalSeconds, 1) } else { 0 }
+            Write-MatrixLog -Message "RESPONSE (queue): elapsed=$($sw.ElapsedMilliseconds)ms content_len=$($fullContent.Length) ~${outTok}tok ${tokRate}tok/s has_tools=$($null -ne $toolCalls)"
+            return @{
+                message = @{
+                    role       = "assistant"
+                    content    = $fullContent.ToString()
+                    tool_calls = $toolCalls
+                }
+            }
+
+        } catch {
+            $msg         = $_.Exception.Message
+            $isRateLimit = $msg -match "429|rate.limit|too.many"
+            $isTransient = $msg -match "timeout|connect|503|502|reset|unavailable"
+
+            if ($attempt -lt $maxRetries -and ($isRateLimit -or $isTransient)) {
+                $wait = if ($isRateLimit) { $delay * 4 } else { $delay }
+                Write-MatrixLog -Level "WARN" -Message "Retrying (attempt $attempt): $msg"
+                Start-Sleep -Seconds $wait
+                $delay *= 2
+            } else {
+                Write-MatrixLog -Level "ERROR" -Message "Network error (attempt $attempt): $msg"
+                return @{ error = $msg }
+            }
+        } finally {
+            if ($reader)     { try { $reader.Dispose()     } catch {} }
+            if ($httpResp)   { try { $httpResp.Dispose()   } catch {} }
+            if ($reqContent) { try { $reqContent.Dispose() } catch {} }
+        }
+    }
+    return @{ error = "All $maxRetries attempts failed" }
+}
+
 # Dispatches all tool calls in a message concurrently using PowerShell runspaces.
 # Each tool runs in its own isolated runspace; results are collected in order.
 function Invoke-MatrixToolchain {
