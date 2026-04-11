@@ -41,6 +41,10 @@ function Show-MatrixGUI {
             </ScrollViewer>
         </Border>
         
+        <!-- Attachment indicator — hidden until a file is queued -->
+        <TextBlock x:Name="AttachLabel" Grid.Row="3" Text="" Foreground="#9CA3AF"
+                   FontSize="12" Margin="48,4,0,0" Visibility="Collapsed"/>
+
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
@@ -87,6 +91,7 @@ function Show-MatrixGUI {
         AttachBtn = $window.FindName("AttachBtn")
         SettingsBtn = $window.FindName("SettingsBtn")
         TokenTracker = $window.FindName("TokenTracker")
+        AttachLabel  = $window.FindName("AttachLabel")
     }
     
     $script:GUI = $global:GUI
@@ -150,18 +155,18 @@ function Invoke-AttachFile {
 
     $path = $dialog.FileName
     try {
-        $content = Get-Content -Path $path -Raw -Encoding UTF8 -ErrorAction Stop
-        $filename = Split-Path $path -Leaf
-        # Truncate large files to avoid flooding context
-        $maxChars = 8000
-        if ($content.Length -gt $maxChars) {
-            $content = $content.Substring(0, $maxChars) + "`n[... file truncated after $maxChars chars ...]"
-        }
-        $snippet = "``````$filename`n$content`n``````"
-        # Append file content to the input box
-        $current = $global:GUI.InputBox.Text
-        $global:GUI.InputBox.Text = if ($current) { "$current`n$snippet" } else { $snippet }
-        $global:GUI.InputBox.CaretIndex = $global:GUI.InputBox.Text.Length
+        $content   = Get-Content -Path $path -Raw -Encoding UTF8 -ErrorAction Stop
+        $filename  = Split-Path $path -Leaf
+        $maxChars  = 8000
+        $truncated = $content.Length -gt $maxChars
+        if ($truncated) { $content = $content.Substring(0, $maxChars) }
+
+        # Store for Invoke-Send to prepend; don't dump into the input box
+        $global:PendingAttachment = @{ Name = $filename; Content = $content }
+
+        $sizeNote = if ($truncated) { "truncated to $maxChars chars" } else { "$($content.Length) chars" }
+        $global:GUI.AttachLabel.Text       = "Attached:  $filename  ($sizeNote)"
+        $global:GUI.AttachLabel.Visibility = "Visible"
         $global:GUI.InputBox.Focus() | Out-Null
     } catch {
         Add-UIChatMessage -Role "system" -Message "Could not read file: $_"

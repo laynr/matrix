@@ -106,13 +106,57 @@ if ($CLI) {
 
     $global:TotalInputTokens  = 0
     $global:TotalOutputTokens = 0
+    $global:PendingAttachment = $null   # @{ Name; Content } when a file is queued
 
-    function Update-TokenDisplay {
-        if ($global:GUI.TokenTracker) {
-            $global:GUI.TokenTracker.Dispatcher.InvokeAsync({
-                $global:GUI.TokenTracker.Text = "Tokens: $($global:TotalInputTokens) In | $($global:TotalOutputTokens) Out"
-            }) | Out-Null
-        }
+    # Runs Invoke-MatrixChat on a background runspace so the WPF dispatcher thread
+    # is never blocked. Polls every 250 ms with a DispatcherTimer; calls $OnComplete
+    # on the UI thread once the runspace finishes.
+    function Start-ChatAsync {
+        param(
+            [hashtable]   $Config,
+            [array]       $Messages,
+            [array]       $Tools,
+            [string]      $ToolCatalog,
+            [scriptblock] $OnComplete
+        )
+        $root = $global:MatrixRoot
+        $ps   = [PowerShell]::Create()
+        [void]$ps.AddScript({
+            param($root, $cfg, $msgs, $tools, $catalog)
+            $global:MatrixRoot = $root
+            . (Join-Path $root "lib" "Logger.ps1")
+            . (Join-Path $root "lib" "Config.ps1")
+            . (Join-Path $root "lib" "Network.ps1")
+            Invoke-MatrixChat -Config $cfg -Messages $msgs -Tools $tools -ToolCatalog $catalog
+        }).AddArgument($root).AddArgument($Config).AddArgument($Messages
+        ).AddArgument($Tools).AddArgument($ToolCatalog)
+
+        $handle = $ps.BeginInvoke()
+        $timer  = [System.Windows.Threading.DispatcherTimer]::new()
+        $timer.Interval = [TimeSpan]::FromMilliseconds(250)
+        $timer.Tag = @{ PS = $ps; Handle = $handle; OnComplete = $OnComplete }
+        $timer.add_Tick({
+            param($src, $e)
+            $s = $src.Tag
+            if (-not $s.Handle.IsCompleted) { return }
+            $src.Stop()
+            try {
+                $raw  = $s.PS.EndInvoke($s.Handle)
+                $resp = if ($raw -and $raw.Count -gt 0) { $raw[0] } else { @{ error = "No response returned" } }
+            } catch {
+                $resp = @{ error = $_.Exception.Message }
+            } finally {
+                $s.PS.Dispose()
+            }
+            & $s.OnComplete $resp
+        })
+        $timer.Start()
+    }
+
+    function Restore-Input {
+        $global:GUI.SendBtn.IsEnabled  = $true
+        $global:GUI.InputBox.IsEnabled = $true
+        $global:GUI.InputBox.Focus() | Out-Null
     }
 
     function Process-AssistantMessage {
@@ -125,68 +169,87 @@ if ($CLI) {
         $maxDepth = if ($global:Config.MaxDepth) { $global:Config.MaxDepth } else { 10 }
         if ($Depth -ge $maxDepth) {
             Add-UIChatMessage -Role "system" -Message "[warn] Max tool call depth ($maxDepth) reached — stopping."
+            Restore-Input
             return
         }
+
         $result = Invoke-MatrixToolchain -Message $assistantMsg.message
         if (-not [string]::IsNullOrWhiteSpace($result.TextOutput)) {
             Add-UIChatMessage -Role "assistant" -Message $result.TextOutput
         }
-        if ($result.HasTools) {
-            foreach ($tc in $result.ToolsCalled) {
-                Add-UIChatMessage -Role "system" -Message "Executing tool $($tc.function.name)..."
+
+        if (-not $result.HasTools) {
+            Prune-Context
+            Restore-Input
+            return
+        }
+
+        foreach ($tc in $result.ToolsCalled) {
+            Add-UIChatMessage -Role "system" -Message "Executing tool $($tc.function.name)..."
+        }
+        foreach ($tr in $result.ToolResults) {
+            Add-Message -Role $tr.role -Content $tr.content
+        }
+        Add-UIChatMessage -Role "system" -Message "Sending tool results..."
+
+        $captureTools   = $Tools
+        $captureCatalog = $ToolCatalog
+        $captureDepth   = $Depth
+
+        Start-ChatAsync -Config $global:Config -Messages (Get-Messages) -Tools $captureTools -ToolCatalog $captureCatalog -OnComplete {
+            param($resp)
+            if ($resp.error) {
+                Add-UIChatMessage -Role "system" -Message "Error: $($resp.error)"
+                Restore-Input
+            } else {
+                Add-Message -Role "assistant" -Content $resp.message.content
+                Process-AssistantMessage -assistantMsg $resp -Depth ($captureDepth + 1) -Tools $captureTools -ToolCatalog $captureCatalog
+                Prune-Context
             }
-            foreach ($tr in $result.ToolResults) {
-                Add-Message -Role $tr.role -Content $tr.content
-            }
-            Add-UIChatMessage -Role "system" -Message "Sending tool results..."
-            $captureTools   = $Tools
-            $captureCatalog = $ToolCatalog
-            $captureDepth   = $Depth
-            $global:GUI.Window.Dispatcher.InvokeAsync({
-                $resp = Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools $captureTools -ToolCatalog $captureCatalog
-                if ($resp.error) { Add-UIChatMessage -Role "system" -Message "Error: $($resp.error)" }
-                elseif ($resp.message) {
-                    Add-Message -Role "assistant" -Content $resp.message.content
-                    Process-AssistantMessage -assistantMsg $resp -Depth ($captureDepth + 1) -Tools $captureTools -ToolCatalog $captureCatalog
-                    Prune-Context
-                }
-            }, [System.Windows.Threading.DispatcherPriority]::Background) | Out-Null
         }
     }
 
     function Invoke-Send {
         $text = $global:GUI.InputBox.Text.Trim()
-        if ([string]::IsNullOrWhiteSpace($text)) { return }
-        $global:GUI.InputBox.Text = ""
-        Add-UIChatMessage -Role "user" -Message $text
+        if ([string]::IsNullOrWhiteSpace($text) -and -not $global:PendingAttachment) { return }
+        $global:GUI.InputBox.Text        = ""
         $global:GUI.SendBtn.IsEnabled    = $false
         $global:GUI.InputBox.IsEnabled   = $false
-        Add-Message -Role "user" -Content $text
+
+        # Build message content — prepend attachment if one is queued
+        $msgContent = $text
+        if ($global:PendingAttachment) {
+            $att        = $global:PendingAttachment
+            $block      = "``````$($att.Name)`n$($att.Content)`n```````n"
+            $msgContent = if ($text) { "$block$text" } else { $block.TrimEnd() }
+            $global:PendingAttachment = $null
+            if ($global:GUI.AttachLabel) {
+                $global:GUI.AttachLabel.Text       = ""
+                $global:GUI.AttachLabel.Visibility = "Collapsed"
+            }
+        }
+
+        Add-UIChatMessage -Role "user" -Message $(if ($text) { $text } else { "(attachment)" })
+        Add-Message -Role "user" -Content $msgContent
         Add-UIChatMessage -Role "system" -Message "Thinking..."
-        # Compute selection before Dispatcher so closure captures the right values
+
         $selTools   = Select-MatrixTools `
                           -UserMessage    $text `
                           -MaxTokenBudget ($global:Config.ToolBudgetTokens ?? 6000) `
                           -MaxCount       ($global:Config.MaxToolCount ?? 25) `
                           -CoreTools      ($global:Config.CoreTools ?? @())
         $selCatalog = Get-MatrixToolCatalog
-        $global:GUI.Window.Dispatcher.InvokeAsync({
-            try {
-                $resp = Invoke-MatrixChat -Config $global:Config -Messages (Get-Messages) -Tools $selTools -ToolCatalog $selCatalog
-                if ($resp.error) { Add-UIChatMessage -Role "system" -Message "Error: $($resp.error)" }
-                else {
-                    Add-Message -Role "assistant" -Content $resp.message.content
-                    Process-AssistantMessage -assistantMsg $resp -Tools $selTools -ToolCatalog $selCatalog
-                    Prune-Context
-                }
-            } catch {
-                Add-UIChatMessage -Role "system" -Message "Exception: $_"
-            } finally {
-                $global:GUI.SendBtn.IsEnabled  = $true
-                $global:GUI.InputBox.IsEnabled = $true
-                $global:GUI.InputBox.Focus() | Out-Null
+
+        Start-ChatAsync -Config $global:Config -Messages (Get-Messages) -Tools $selTools -ToolCatalog $selCatalog -OnComplete {
+            param($resp)
+            if ($resp.error) {
+                Add-UIChatMessage -Role "system" -Message "Error: $($resp.error)"
+                Restore-Input
+            } else {
+                Add-Message -Role "assistant" -Content $resp.message.content
+                Process-AssistantMessage -assistantMsg $resp -Tools $selTools -ToolCatalog $selCatalog
             }
-        }, [System.Windows.Threading.DispatcherPriority]::Background) | Out-Null
+        }
     }
 
     $null = Get-MatrixTools        # populate tool cache so Select-MatrixTools works
