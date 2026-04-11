@@ -55,6 +55,8 @@ tests/
 - GUI uses blocking `Invoke-MatrixChat`; CLI uses `Invoke-MatrixStreamingChat`
 - Logger mutex uses `Global\MatrixLogMutex` on Windows, bare name on macOS/Linux
 - Config defaults centralised in `Load-Config` — all limits (MaxTokens, MaxDepth, etc.) come from there
+- `Invoke-CoerceArg` coerces JSON strings `"true"`/`"false"` to `[bool]` — model often sends string for bool params
+- CLI uses `Select-MatrixTools` (≤25 tools, 6000-token budget) + full catalog per turn — never dumps all schemas at once
 
 ---
 
@@ -90,8 +92,8 @@ pwsh tests/Run-Tests.ps1
 ```
 
 This includes `Test-LiveAgent.ps1` — two suites:
-- **E2E**: sends "do something that uses all your tools" through the real streaming pipeline
-- **Per-tool**: one test per discovered tool, exposing only that tool to the model to force deterministic invocation
+- **E2E**: passes 3 explicit safe tools and a directed prompt through the real streaming pipeline; verifies ≥1 tool is invoked
+- **Per-tool**: one test per discovered tool, exposing only that tool to the model to force deterministic invocation; smaller models (3b) may non-deterministically answer from memory — expect 1–3 [warn] failures per run, not regressions
 
 Run just the live tests:
 ```powershell
@@ -101,8 +103,16 @@ pwsh tests/Run-Tests.ps1 -Suite LiveAgent
 ### After every commit
 
 Check whether any new pattern, decision, or preference should be saved:
-- Memory files: `~/.claude/projects/-Users-layne-projects-matrix/memory/`
+- Memory files: `~/.claude/projects/C--Users-matrix-projects-matrix/memory/`
 - This file (`CLAUDE.md`) if the architecture or workflow changed
+
+### Model requirements
+
+`gemma4:latest` (default) needs ~10 GB RAM. Low-memory machines need a smaller model:
+```json
+{ "Model": "llama3.2:3b" }
+```
+`config.json` is gitignored — set it per machine. Pull with `ollama pull llama3.2:3b`.
 
 ### Adding a new tool
 
