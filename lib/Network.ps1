@@ -52,6 +52,8 @@ function Get-DynamicNumCtx {
 # booleans, ints, and doubles rather than everything as a string.
 function Invoke-CoerceArg {
     param($Value)
+    # Treat JSON nil/null/empty as $null so the param is omitted and PowerShell uses its default.
+    if ($Value -is [string] -and $Value -in @('nil', 'null', '')) { return $null }
     switch ($Value) {
         { $_ -is [bool]   } { return [bool]$_;   break }
         { $_ -is [long]   } { return [int]$_;    break }
@@ -303,12 +305,20 @@ function Invoke-MatrixToolchain {
             try {
                 $parsed = $rawArgs | ConvertFrom-Json
                 $parsed.PSObject.Properties | ForEach-Object {
-                    $argsHash[$_.Name] = Invoke-CoerceArg $_.Value
+                    $cleanName = $_.Name.Trim().TrimStart('-')
+                    $coerced   = Invoke-CoerceArg $_.Value
+                    if ($cleanName -ne '' -and $null -ne $coerced) {
+                        $argsHash[$cleanName] = $coerced
+                    }
                 }
             } catch {}
         } elseif ($rawArgs -and $rawArgs.PSObject) {
             $rawArgs.PSObject.Properties | ForEach-Object {
-                $argsHash[$_.Name] = Invoke-CoerceArg $_.Value
+                $cleanName = $_.Name.Trim().TrimStart('-')
+                $coerced   = Invoke-CoerceArg $_.Value
+                if ($cleanName -ne '' -and $null -ne $coerced) {
+                    $argsHash[$cleanName] = $coerced
+                }
             }
         }
 

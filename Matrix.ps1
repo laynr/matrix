@@ -189,5 +189,8 @@ if ($CLI) {
         }, [System.Windows.Threading.DispatcherPriority]::Background) | Out-Null
     }
 
+    $null = Get-MatrixTools        # populate tool cache so Select-MatrixTools works
+    $null = Get-MatrixRunspacePool # pre-warm runspaces before first message
+
     Show-MatrixGUI
 }

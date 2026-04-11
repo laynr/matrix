@@ -144,6 +144,32 @@ function Add-UIChatMessage {
     $global:GUI.ChatScrollViewer.ScrollToEnd()
 }
 
+function Invoke-AttachFile {
+    $dialog = [Microsoft.Win32.OpenFileDialog]::new()
+    $dialog.Title  = "Attach File"
+    $dialog.Filter = "Text files (*.txt;*.md;*.ps1;*.json;*.csv;*.log)|*.txt;*.md;*.ps1;*.json;*.csv;*.log|All files (*.*)|*.*"
+    if ($dialog.ShowDialog($global:GUI.Window) -ne $true) { return }
+
+    $path = $dialog.FileName
+    try {
+        $content = Get-Content -Path $path -Raw -Encoding UTF8 -ErrorAction Stop
+        $filename = Split-Path $path -Leaf
+        # Truncate large files to avoid flooding context
+        $maxChars = 8000
+        if ($content.Length -gt $maxChars) {
+            $content = $content.Substring(0, $maxChars) + "`n[... file truncated after $maxChars chars ...]"
+        }
+        $snippet = "``````$filename`n$content`n``````"
+        # Append file content to the input box
+        $current = $global:GUI.InputBox.Text
+        $global:GUI.InputBox.Text = if ($current) { "$current`n$snippet" } else { $snippet }
+        $global:GUI.InputBox.CaretIndex = $global:GUI.InputBox.Text.Length
+        $global:GUI.InputBox.Focus() | Out-Null
+    } catch {
+        Add-UIChatMessage -Role "system" -Message "Could not read file: $_"
+    }
+}
+
 function Show-SettingsGUI {
     [xml]$settingsXaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
