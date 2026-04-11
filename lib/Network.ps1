@@ -56,6 +56,9 @@ function Invoke-CoerceArg {
         { $_ -is [bool]   } { return [bool]$_;   break }
         { $_ -is [long]   } { return [int]$_;    break }
         { $_ -is [double] } { return [double]$_; break }
+        { $_ -is [string] -and $_ -in @('true','false','True','False') } {
+            return [bool]::Parse($_); break
+        }
         default             { return [string]$_ }
     }
 }

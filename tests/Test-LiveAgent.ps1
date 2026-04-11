@@ -267,7 +267,7 @@ $ToolPrompts = @{
 
     # ── Images ────────────────────────────────────────────────────────────────
     'Get-ImageMetadata'     = "Get the EXIF metadata for the image at: $tmpDir/matrix-test.jpg"
-    'Search-Images'         = "Search for images of 'sunset over ocean' online."
+    'Search-Images'         = "Find all image files (jpg, png) in the directory: $tmpDir"
     'Sort-ImageFiles'       = "Organize the image files in $tmpDir into date-based subfolders."
 
     # ── Notifications / messaging ─────────────────────────────────────────────

@@ -29,6 +29,11 @@ try {
     $cert = $null
 
     if ($Path) {
+        # Auto-redirect: model may pass a URL to Path instead of Url.
+        if ($Path -match '^https?://') { $Url = $Path; $Path = "" }
+    }
+
+    if ($Path) {
         $resolved = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
         if (-not (Test-Path -LiteralPath $resolved)) {
             return @{ error = "File not found: $resolved" } | ConvertTo-Json -Compress

@@ -13,12 +13,15 @@ Optional hashtable of default headers to include in every request.
 #>
 [CmdletBinding()]
 param(
-    [string]$BaseUrl    = "",
-    [string]$UserAgent  = "Mozilla/5.0 (compatible; Matrix-Agent/1.0)",
-    [hashtable]$Headers = @{}
+    [string]$BaseUrl   = "",
+    [string]$UserAgent = "Mozilla/5.0 (compatible; Matrix-Agent/1.0)",
+    $Headers           = @{}   # hashtable or empty string — coerced below
 )
 
 try {
+    # Model may pass empty string for an optional hashtable param; treat as no headers.
+    if (-not ($Headers -is [hashtable])) { $Headers = @{} }
+
     $tmpDir = [System.IO.Path]::GetTempPath()
 
     $sessionFile = Join-Path $tmpDir "matrix-session-$([System.Guid]::NewGuid()).json"
