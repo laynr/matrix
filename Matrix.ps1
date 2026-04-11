@@ -7,6 +7,20 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Auto-relaunch in pwsh 7 if invoked from Windows PowerShell 5.x
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+    $pwsh    = if ($pwshCmd) { $pwshCmd.Source } else { $null }
+    if (-not $pwsh) {
+        Write-Error "PowerShell 7 (pwsh) is required. Install from https://aka.ms/powershell"
+        exit 1
+    }
+    $relArgs = @('-NoProfile', '-File', $MyInvocation.MyCommand.Path)
+    if ($CLI) { $relArgs += '-CLI' }
+    & $pwsh @relArgs
+    exit $LASTEXITCODE
+}
+
 # On non-Windows there is no WPF — always use CLI
 if (-not $IsWindows) { $CLI = $true }
 

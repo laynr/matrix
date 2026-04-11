@@ -324,10 +324,10 @@ function Show-SettingsGUI {
         Title="Settings" Height="480" Width="420" Background="#1A1A1A" WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
     <StackPanel Margin="16">
         <TextBlock Text="Endpoint (Ollama URL):" Foreground="#9CA3AF" FontSize="12" Margin="0,0,0,4"/>
-        <TextBox x:Name="EndpointBox" Background="#2A2A2A" Foreground="White" BorderBrush="#3F3F46" BorderThickness="1" Padding="8,6" FontSize="13" CornerRadius="4"/>
+        <TextBox x:Name="EndpointBox" Background="#2A2A2A" Foreground="White" BorderBrush="#3F3F46" BorderThickness="1" Padding="8,6" FontSize="13"/>
 
         <TextBlock Text="Model:" Foreground="#9CA3AF" FontSize="12" Margin="0,12,0,4"/>
-        <TextBox x:Name="ModelBox" Background="#2A2A2A" Foreground="White" BorderBrush="#3F3F46" BorderThickness="1" Padding="8,6" FontSize="13" CornerRadius="4"/>
+        <TextBox x:Name="ModelBox" Background="#2A2A2A" Foreground="White" BorderBrush="#3F3F46" BorderThickness="1" Padding="8,6" FontSize="13"/>
 
         <TextBlock Text="API Key (if required):" Foreground="#9CA3AF" FontSize="12" Margin="0,12,0,4"/>
         <PasswordBox x:Name="ApiKeyBox" Background="#2A2A2A" Foreground="White" BorderBrush="#3F3F46" BorderThickness="1" Padding="8,6" FontSize="13"/>
