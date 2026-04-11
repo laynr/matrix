@@ -149,7 +149,8 @@ if ($IsWindows) {
     $binDir = if ($env:MATRIX_BIN_DIR) { $env:MATRIX_BIN_DIR } else { Join-Path $HOME "bin" }
     if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir | Out-Null }
     $launcher = Join-Path $binDir "matrix.ps1"
-    "& `"$matrixScript`" @args" | Set-Content $launcher -Encoding UTF8
+    # Always invoke via pwsh so Windows PowerShell 5 users get PowerShell 7 syntax support.
+    "pwsh -NoProfile -ExecutionPolicy Bypass -File `"$matrixScript`" @args" | Set-Content $launcher -Encoding UTF8
     $userPath = [Environment]::GetEnvironmentVariable("PATH","User")
     if ($userPath -notlike "*$binDir*") {
         [Environment]::SetEnvironmentVariable("PATH","$binDir;$userPath","User")
