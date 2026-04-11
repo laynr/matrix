@@ -13,16 +13,10 @@ if ! echo "$COMMAND" | grep -qE 'git\s+commit'; then
     exit 0
 fi
 
-# Find the matrix tests directory
-MATRIX_DIR=""
-for candidate in "/Users/layne/projects/matrix" "$HOME/.matrix" "$(pwd)"; do
-    if [[ -f "$candidate/tests/Run-Tests.ps1" ]]; then
-        MATRIX_DIR="$candidate"
-        break
-    fi
-done
+# Resolve project root dynamically — works on any machine/OS
+MATRIX_DIR=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
 
-if [[ -z "$MATRIX_DIR" ]]; then
+if [[ -z "$MATRIX_DIR" || ! -f "$MATRIX_DIR/tests/Run-Tests.ps1" ]]; then
     echo "  [pre-commit] Matrix tests not found — skipping test gate" >&2
     exit 0
 fi

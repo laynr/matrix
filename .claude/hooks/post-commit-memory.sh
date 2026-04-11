@@ -17,7 +17,13 @@ if [[ "$EXIT_CODE" != "0" ]]; then
     exit 0
 fi
 
-cat <<'EOF'
+# Derive memory path dynamically from the actual project root — works on any machine
+PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+# Convert to the Claude project key format: leading slash removed, remaining slashes → dashes
+PROJECT_KEY=$(echo "$PROJECT_ROOT" | sed 's|^/||; s|/|-|g; s|\\|-|g; s|:||g')
+MEMORY_DIR="$HOME/.claude/projects/$PROJECT_KEY/memory"
+
+cat <<EOF
 
 ────────────────────────────────────────────────────────────
   POST-COMMIT MEMORY REVIEW
@@ -26,7 +32,7 @@ cat <<'EOF'
   should be updated before ending this session:
 
   1. Memory files in:
-     ~/.claude/projects/-Users-layne-projects-matrix/memory/
+     $MEMORY_DIR
      → New patterns, decisions, user preferences, or lessons?
 
   2. CLAUDE.md (project guide):
@@ -35,7 +41,7 @@ cat <<'EOF'
   3. .claude/commands/ (skills):
      → New workflow worth capturing as a slash command?
 
-  Run: ls ~/.claude/projects/-Users-layne-projects-matrix/memory/
+  Run: ls "$MEMORY_DIR"
 ────────────────────────────────────────────────────────────
 EOF
 
