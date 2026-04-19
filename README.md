@@ -1,6 +1,6 @@
 # Matrix
 
-An AI agent built in **PowerShell Core (pwsh 7+)**. Runs on **Mac, Linux, and Windows** using Ollama + gemma4. Tools are `.ps1` scripts dropped into the `tools/` directory — 61 built-in tools, auto-discovered.
+An AI agent built in **PowerShell Core (pwsh 7+)**. Runs on **Mac, Linux, and Windows** using Ollama. Tools are `.ps1` scripts dropped into the `tools/` directory — 61 built-in tools, auto-discovered.
 
 ## Install — one command
 
@@ -17,7 +17,7 @@ irm https://raw.githubusercontent.com/laynr/matrix/main/install/install.ps1 | ie
 The installer:
 1. Installs **PowerShell 7** (`pwsh`) if missing — using native OS tools only (brew/pkg on Mac, snap/apt/dnf/tarball on Linux, winget/MSI on Windows)
 2. Installs **Ollama** if missing
-3. Pulls **gemma4:latest**
+3. Pulls the best model for your available RAM (auto-selected from a tier list; default `qwen3:4b`)
 4. Downloads and extracts the latest release to `~/.matrix`
 5. Installs a `matrix` command
 6. Starts Matrix immediately
@@ -215,29 +215,32 @@ Type `reload` in the REPL — the tool is live immediately, no restart.
 
 ## Configuration
 
-```powershell
-# Override model
-$env:MATRIX_MODEL = "gemma4:27b"
-matrix
-
-# Custom install location
-$env:MATRIX_HOME = "/opt/matrix"
-```
-
-Or edit `~/.matrix/config.json`:
+Edit `~/.matrix/config.json` (all fields optional):
 ```json
 {
-  "Model":        "gemma4:latest",
-  "Endpoint":     "http://localhost:11434/api/chat",
-  "SystemPrompt": "You are Matrix...",
-  "NumCtx":       0,
-  "MaxTokens":    100000,
-  "SummarizeAt":  75000,
-  "MaxDepth":     10
+  "Model":             "qwen3:4b",
+  "Endpoint":          "http://localhost:11434/api/chat",
+  "SystemPrompt":      "You are Matrix...",
+  "NumCtx":            0,
+  "MaxTokens":         100000,
+  "SummarizeAt":       75000,
+  "MaxDepth":          10,
+  "ToolBudgetTokens":  6000,
+  "MaxToolCount":      25,
+  "CoreTools":         []
 }
 ```
 
-All fields are optional. `NumCtx = 0` means auto-calculate context size from message + tool schema sizes.
+`Model` is **auto-selected** based on available RAM and which models are installed in Ollama — you don't need to set it unless you want to pin a specific model. The default tier pyramid:
+
+| RAM | Auto-selected model |
+|-----|---------------------|
+| ≥20 GB | `qwen3:8b` |
+| ≥12 GB | `qwen2.5:7b` |
+| ≥6 GB | `qwen3:4b` |
+| any | `llama3.2:3b` |
+
+`NumCtx = 0` means auto-calculate context size from message + tool schema sizes.
 
 ## Windows
 
@@ -264,7 +267,9 @@ pwsh tests/Run-Tests.ps1 -SchemaOnly
 pwsh tests/Run-Tests.ps1
 
 # Specific suite
+pwsh tests/Run-Tests.ps1 -Suite Config
 pwsh tests/Run-Tests.ps1 -Suite Tools
+pwsh tests/Run-Tests.ps1 -Suite MultiTool
 pwsh tests/Run-Tests.ps1 -Suite LiveAgent
 ```
 
