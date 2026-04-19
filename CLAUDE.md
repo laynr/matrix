@@ -1,6 +1,6 @@
 # Matrix — Claude Code Development Guide
 
-Cross-platform AI agent in PowerShell 7. Runs Ollama + gemma4 on Mac, Linux, and Windows. Repo: `laynr/matrix`.
+Cross-platform AI agent in PowerShell 7. Runs Ollama + qwen3 on Mac, Linux, and Windows. Repo: `laynr/matrix`.
 
 ---
 
@@ -17,14 +17,16 @@ Cross-platform AI agent in PowerShell 7. Runs Ollama + gemma4 on Mac, Linux, and
 ```
 Matrix.ps1              ← Entry point. -CLI forces terminal; default is WPF GUI on Windows.
 lib/
-  Config.ps1            ← Load/save config.json; defaults for all tuneable values
+  Config.ps1            ← Load-Config, Save-Config, Select-MatrixModel (RAM-aware tier selection),
+                           Get-SystemRamGB, Get-OllamaModels; defaults for all tuneable values
   Network.ps1           ← Invoke-MatrixStreamingChat (CLI), Invoke-MatrixChat (GUI),
                            Invoke-MatrixToolchain (RunspacePool), Limit-ToolResult,
-                           Get-MatrixRunspacePool, Get-DynamicNumCtx
+                           Get-MatrixRunspacePool (pre-loads Logger/ToolManager via InitialSessionState),
+                           Get-DynamicNumCtx
   Context.ps1           ← Message history, Prune-Context (summarize → smart prune),
                            Invoke-ContextSummary, Get-ContextTokenCount
-  ToolManager.ps1       ← AST schema discovery, mtime cache, Reset-ToolCache,
-                           Invoke-MatrixTool
+  ToolManager.ps1       ← AST schema discovery, two-tier cache (memory + disk at tools/.schema-cache.json),
+                           Get-MatrixTools, Select-MatrixTools, Reset-ToolCache, Invoke-MatrixTool
   CLI.ps1               ← Show-MatrixCLI, Process-OllamaMessage (streaming loop),
                            Show-MatrixError, Show-ContextStatus, Show-MatrixHelp,
                            Show-MatrixToolsList
@@ -38,10 +40,11 @@ install/
   uninstall.pwsh.ps1    ← Removes ~/.matrix and the launcher
 tests/
   Test-Framework.ps1    ← Assert-*, Invoke-Tool, Test-ToolSchema
+  Test-Config.ps1       ← Unit tests: Load-Config, Save-Config, Select-MatrixModel, RAM/Ollama helpers
   Test-Tools.ps1        ← Unit tests: every tool (schema + live calls)
   Test-MultiTool.ps1    ← Integration: parallel dispatch, type coercion, cache
   Test-LiveAgent.ps1    ← E2E: streaming pipeline + per-tool deterministic tests
-  Run-Tests.ps1         ← Master runner: -SchemaOnly (CI), -Suite Tools|MultiTool|LiveAgent
+  Run-Tests.ps1         ← Master runner: -SchemaOnly (CI), -Suite Config|Tools|MultiTool|LiveAgent
 .github/workflows/
   publish.yml           ← zip release → publish to laynr/matrix releases (push to main)
 ```
@@ -50,6 +53,9 @@ tests/
 - System prompt injected on every API call, never stored in `$global:MatrixMessages`
 - Streaming via `System.Net.Http.HttpClient` NDJSON — tokens print live in CLI path
 - Parallel tool dispatch via `RunspacePool` (1–8 warm runspaces, shared across turns)
+- RunspacePool pre-loads `Logger.ps1` and `ToolManager.ps1` via `InitialSessionState` at pool-open time — eliminates per-call dot-source overhead
+- Tool schema cache is two-tier: memory (mtime fingerprint) → disk (`tools/.schema-cache.json`); cold starts skip AST parsing when files unchanged
+- Model auto-selected by `Select-MatrixModel`: walks `ModelTiers` sorted by RAM, picks best tier that fits available RAM **and** is installed in Ollama; skips auto-select when `Model` is explicitly set in `config.json`
 - Context budget: summarize at SummarizeAt tokens (Phase A), smart prune fallback (Phase B)
 - Tool results truncated at 8,000 chars via `Limit-ToolResult`
 - GUI uses blocking `Invoke-MatrixChat`; CLI uses `Invoke-MatrixStreamingChat`
@@ -66,13 +72,17 @@ All fields are optional — defaults apply when absent.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `Model` | `gemma4:latest` | Ollama model name |
+| `Model` | `qwen3:4b` | Ollama model name. Auto-selected from `ModelTiers` based on RAM when not explicitly set in config.json |
+| `ModelTiers` | 4-tier pyramid (qwen3:8b/20GB, qwen2.5:7b/12GB, qwen3:4b/6GB, llama3.2:3b/0GB) | RAM-aware tier list; each entry is `@{ MinRamGB; Model }`. `Select-MatrixModel` picks highest fitting installed tier |
 | `Endpoint` | `http://localhost:11434/api/chat` | Ollama API URL |
 | `SystemPrompt` | (built-in) | Agent personality, injected fresh on every call |
 | `NumCtx` | `0` | Context window size. 0 = auto-calculate from message+tool sizes |
 | `MaxTokens` | `100000` | Token budget ceiling for context pruning display |
 | `SummarizeAt` | `75000` | Tokens threshold that triggers Phase A summarisation |
 | `MaxDepth` | `10` | Max tool-call recursion depth per user turn |
+| `ToolBudgetTokens` | `6000` | Max tokens for injected tool schemas per request |
+| `MaxToolCount` | `25` | Hard cap on tools selected per request |
+| `CoreTools` | `@()` | Tool names always included regardless of relevance scoring |
 
 ---
 
@@ -84,7 +94,7 @@ All fields are optional — defaults apply when absent.
 pwsh tests/Run-Tests.ps1 -SchemaOnly
 ```
 
-Schema validation + unit tests, no network. All must pass. The pre-commit hook enforces this automatically.
+Schema validation + Config and Tools unit tests, no network. All must pass. The pre-commit hook enforces this automatically.
 
 Full suite (requires Ollama running):
 ```powershell
@@ -108,11 +118,20 @@ Check whether any new pattern, decision, or preference should be saved:
 
 ### Model requirements
 
-`gemma4:latest` (default) needs ~10 GB RAM. Low-memory machines need a smaller model:
+The model is **auto-selected** based on available RAM and installed Ollama models (via `Select-MatrixModel`). The default tier pyramid:
+
+| RAM | Model |
+|-----|-------|
+| ≥20 GB | `qwen3:8b` |
+| ≥12 GB | `qwen2.5:7b` |
+| ≥6 GB | `qwen3:4b` |
+| any | `llama3.2:3b` |
+
+To pin a specific model, set `Model` explicitly in `config.json` (disables auto-selection):
 ```json
 { "Model": "llama3.2:3b" }
 ```
-`config.json` is gitignored — set it per machine. Pull with `ollama pull llama3.2:3b`.
+`config.json` is gitignored — set it per machine. Pull models with `ollama pull <model>`.
 
 ### Adding a new tool
 
@@ -153,7 +172,9 @@ Or manually: create `tools/ToolName.ps1`, add a `Start-Suite` block to `tests/Te
 
 ```powershell
 pwsh tests/Run-Tests.ps1 -SchemaOnly        # before every commit
-pwsh tests/Run-Tests.ps1 -Suite Tools       # single suite
+pwsh tests/Run-Tests.ps1 -Suite Config      # config unit tests only
+pwsh tests/Run-Tests.ps1 -Suite Tools       # tool unit tests only
+pwsh tests/Run-Tests.ps1 -Suite MultiTool   # integration tests only
 pwsh tests/Run-Tests.ps1 -Suite LiveAgent   # live tests only (needs Ollama)
 pwsh Matrix.ps1 -CLI                        # run the agent
 tail -f err.log                             # live log
