@@ -38,6 +38,10 @@ if (Test-Path $logPath) { Remove-Item $logPath -Force }
 Write-MatrixLog -Message "Matrix starting (pwsh $($PSVersionTable.PSVersion))"
 
 $global:Config = Load-Config
+if (-not $global:Config.ModelExplicit) {
+    $global:Config.Model = Select-MatrixModel -Config $global:Config
+    Write-MatrixLog -Message "Auto-selected model: $($global:Config.Model)"
+}
 Clear-Messages
 
 # ── Auto-update: silently pull latest release on launch ───────────────────────

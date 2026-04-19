@@ -30,33 +30,25 @@ echo ""
 
 # ── Install pwsh if missing ────────────────────────────────────────────────────
 install_pwsh_macos() {
-    # Try Homebrew casks in order of availability
-    if command -v brew >/dev/null 2>&1; then
-        info "Trying PowerShell via Homebrew..."
-        brew install --cask powershell 2>/dev/null \
-            || brew install --cask powershell@preview 2>/dev/null \
-            || { brew tap microsoft/homebrew-tap 2>/dev/null; brew install --cask powershell 2>/dev/null; } \
-            || true
-    fi
+    case "$ARCH" in
+        arm64)  PKG_ARCH="osx-arm64" ;;
+        x86_64) PKG_ARCH="osx-x64" ;;
+        *)      die "Unsupported Mac arch: $ARCH" ;;
+    esac
 
-    # Fall through to .pkg if Homebrew didn't get us there
-    if ! command -v pwsh >/dev/null 2>&1; then
-        case "$ARCH" in
-            arm64)  PKG_ARCH="osx-arm64" ;;
-            x86_64) PKG_ARCH="osx-x64" ;;
-            *)      die "Unsupported Mac arch: $ARCH" ;;
-        esac
-        PWSH_VER=$(curl -fsSL "https://api.github.com/repos/PowerShell/PowerShell/releases/latest" \
-            | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
-        [ -z "$PWSH_VER" ] && die "Could not resolve latest PowerShell version"
-        TMP_PKG="$(mktemp /tmp/pwsh.XXXXXX.pkg)"
-        info "Downloading powershell-${PWSH_VER}-${PKG_ARCH}.pkg..."
-        curl -fsSL "https://github.com/PowerShell/PowerShell/releases/download/v${PWSH_VER}/powershell-${PWSH_VER}-${PKG_ARCH}.pkg" \
-            -o "$TMP_PKG" --retry 3 --retry-delay 2
-        info "Installing package (requires sudo)..."
-        sudo installer -pkg "$TMP_PKG" -target /
-        rm -f "$TMP_PKG"
-    fi
+    PWSH_VER=$(curl -fsSL "https://api.github.com/repos/PowerShell/PowerShell/releases/latest" \
+        | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
+    [ -z "$PWSH_VER" ] && die "Could not resolve latest PowerShell version"
+
+    TMP_PKG="$(mktemp /tmp/pwsh.XXXXXX).pkg"
+    PKG_URL="https://github.com/PowerShell/PowerShell/releases/download/v${PWSH_VER}/powershell-${PWSH_VER}-${PKG_ARCH}.pkg"
+
+    info "Downloading PowerShell ${PWSH_VER} (${PKG_ARCH})..."
+    curl -fsSL "$PKG_URL" -o "$TMP_PKG" --retry 3 --retry-delay 2
+
+    info "Installing package (requires sudo)..."
+    sudo installer -pkg "$TMP_PKG" -target /
+    rm -f "$TMP_PKG"
 }
 
 install_pwsh_linux() {

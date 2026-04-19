@@ -13,11 +13,25 @@ function Get-MatrixHttpClient {
 }
 
 # Returns a warm RunspacePool shared across all tool dispatches.
-# Pre-allocating avoids the overhead of creating a fresh runspace per tool call.
+# Uses InitialSessionState to pre-load Logger and ToolManager into every runspace
+# once at pool-open time, eliminating the per-call dot-source overhead.
 function Get-MatrixRunspacePool {
     if (-not $script:ToolRunspacePool -or
         $script:ToolRunspacePool.RunspacePoolStateInfo.State -ne 'Opened') {
-        $pool = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool(1, 8)
+
+        $iss = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
+
+        # Expose MatrixRoot to the runspace global scope so lib files and tools can use it
+        [void]$iss.Variables.Add([System.Management.Automation.Runspaces.SessionStateVariableEntry]::new(
+            'MatrixRoot', $global:MatrixRoot, '',
+            [System.Management.Automation.ScopedItemOptions]::AllScope
+        ))
+
+        # Run lib files once per runspace at open time instead of once per tool call
+        [void]$iss.StartupScripts.Add((Join-Path $global:MatrixRoot 'lib' 'Logger.ps1'))
+        [void]$iss.StartupScripts.Add((Join-Path $global:MatrixRoot 'lib' 'ToolManager.ps1'))
+
+        $pool = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool(1, 8, $iss, $Host)
         $pool.Open()
         $script:ToolRunspacePool = $pool
     }
@@ -459,9 +473,7 @@ function Invoke-MatrixToolchain {
         $ps.RunspacePool = $pool
         [void]$ps.AddScript({
             param($root, $toolName, $inputArgs)
-            $global:MatrixRoot = $root
-            . (Join-Path $root "lib" "Logger.ps1")
-            . (Join-Path $root "lib" "ToolManager.ps1")
+            $global:MatrixRoot = $root   # ensure tool scripts see the correct root
             Invoke-MatrixTool -ToolName $toolName -InputArgs $inputArgs
         }).AddArgument($global:MatrixRoot).AddArgument($name).AddArgument($argsHash)
 

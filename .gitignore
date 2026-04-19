@@ -1,4 +1,5 @@
 config.json
+tools/.schema-cache.json
 *.log
 err.log
 .DS_Store

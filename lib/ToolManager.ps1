@@ -1,18 +1,57 @@
 # Discovers tools from the tools/ directory and builds Ollama-compatible schemas.
 # Each tool is a .ps1 file. The function name = file basename.
 # Parameters and .SYNOPSIS are parsed via PowerShell AST.
-# Schemas are cached in memory and only rebuilt when a tool file changes.
+# Schemas are cached in memory and persisted to tools/.schema-cache.json so cold
+# starts skip AST parsing when no tool files have changed.
 
 $script:ToolCache           = $null
-$script:ToolCacheMtime      = @{}   # BaseName → LastWriteTime
-$script:ToolDiscoveryErrors = @()   # @{ Name; Error } for each broken tool
-$script:ToolSchemaJsonCache = @{}   # BaseName → compact JSON string of full schema
+$script:ToolCacheMtime      = @{}
+$script:ToolDiscoveryErrors = @()
+$script:ToolSchemaJsonCache = @{}
+
+function Get-SchemaCachePath {
+    Join-Path $global:MatrixRoot "tools" ".schema-cache.json"
+}
+
+function Load-ToolSchemaCache {
+    param([hashtable]$Fingerprint)
+    $path = Get-SchemaCachePath
+    if (-not (Test-Path $path)) { return $null }
+    try {
+        $cached = Get-Content $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $fp = $cached.fingerprint
+        if (-not $fp) { return $null }
+        # Count must match
+        $cachedCount = ($fp.PSObject.Properties | Measure-Object).Count
+        if ($cachedCount -ne $Fingerprint.Count) { return $null }
+        # Every key and value must match
+        foreach ($key in $Fingerprint.Keys) {
+            if ($fp.$key -ne $Fingerprint[$key]) { return $null }
+        }
+        return $cached
+    } catch { return $null }
+}
+
+function Save-ToolSchemaCache {
+    param([hashtable]$Fingerprint, [array]$Schemas, [hashtable]$SchemaJson)
+    try {
+        @{
+            fingerprint = $Fingerprint
+            schemas     = $Schemas
+            schemaJson  = $SchemaJson
+        } | ConvertTo-Json -Depth 10 -Compress | Set-Content (Get-SchemaCachePath) -Encoding UTF8
+    } catch {
+        Write-MatrixLog -Level "WARN" -Message "Failed to write schema cache: $_"
+    }
+}
 
 function Reset-ToolCache {
     $script:ToolCache           = $null
     $script:ToolCacheMtime      = @{}
     $script:ToolDiscoveryErrors = @()
     $script:ToolSchemaJsonCache = @{}
+    $cachePath = Get-SchemaCachePath
+    if (Test-Path $cachePath) { Remove-Item $cachePath -Force -ErrorAction SilentlyContinue }
 }
 
 function Get-MatrixTools {
@@ -28,12 +67,32 @@ function Get-MatrixTools {
 
     $scripts = @(Get-ChildItem -Path $toolsDir -Filter "*.ps1")
 
-    # Cache hit: same file count AND no file has a newer mtime
+    # Build mtime fingerprint for all tool files
+    $fingerprint = @{}
+    foreach ($s in $scripts) { $fingerprint[$s.BaseName] = $s.LastWriteTime.ToString("o") }
+
+    # In-memory cache hit
     $dirty = ($scripts.Count -ne $script:ToolCacheMtime.Count) -or
              ($scripts | Where-Object { $script:ToolCacheMtime[$_.BaseName] -ne $_.LastWriteTime })
 
     if (-not $dirty -and $script:ToolCache) {
         Write-MatrixLog -Message "Tool cache hit ($($script:ToolCache.Count) tools)"
+        return $script:ToolCache
+    }
+
+    # Disk cache hit — skip AST parsing on clean restarts
+    $diskCache = Load-ToolSchemaCache -Fingerprint $fingerprint
+    if ($diskCache -and $diskCache.schemas) {
+        $script:ToolCache = @($diskCache.schemas)
+        $script:ToolCacheMtime = @{}
+        foreach ($s in $scripts) { $script:ToolCacheMtime[$s.BaseName] = $s.LastWriteTime }
+        $script:ToolSchemaJsonCache = @{}
+        if ($diskCache.schemaJson) {
+            $diskCache.schemaJson.PSObject.Properties | ForEach-Object {
+                $script:ToolSchemaJsonCache[$_.Name] = $_.Value
+            }
+        }
+        Write-MatrixLog -Message "Tool disk cache hit ($($script:ToolCache.Count) tools)"
         return $script:ToolCache
     }
 
@@ -48,12 +107,10 @@ function Get-MatrixTools {
             )
             if ($null -eq $ast) { continue }
 
-            # Description from .SYNOPSIS
             $description = "Tool: $($script.BaseName)"
             $help = $ast.GetHelpContent()
             if ($help -and $help.Synopsis) { $description = $help.Synopsis.Trim() }
 
-            # Parameters
             $properties = [ordered]@{}
             $required   = @()
 
@@ -76,10 +133,8 @@ function Get-MatrixTools {
                     $properties[$pName] = @{ type = $pType; description = $pDesc }
 
                     foreach ($attr in @($p.Attributes)) {
-                        # Must be an AttributeAst (not a type constraint like [string])
                         if ($attr -isnot [System.Management.Automation.Language.AttributeAst]) { continue }
                         if ($attr.TypeName.Name -ne 'Parameter') { continue }
-                        # Handle both [Parameter(Mandatory)] and [Parameter(Mandatory = $true)]
                         $mandatoryArg = $attr.NamedArguments |
                                         Where-Object { $_.ArgumentName -eq 'Mandatory' }
                         if ($mandatoryArg) {
@@ -114,7 +169,6 @@ function Get-MatrixTools {
         $_ -is [hashtable] -and $_.function -and $_.function.name
     }
 
-    # Deduplicate
     $seen   = @{}
     $unique = @()
     foreach ($t in $valid) {
@@ -124,24 +178,21 @@ function Get-MatrixTools {
         }
     }
 
-    # Update cache
     $script:ToolCache = [array]$unique
     $script:ToolCacheMtime = @{}
     foreach ($s in $scripts) { $script:ToolCacheMtime[$s.BaseName] = $s.LastWriteTime }
 
-    # Pre-serialize each schema once for O(1) length lookups in Select-MatrixTools
     $script:ToolSchemaJsonCache = @{}
     foreach ($t in $unique) {
         $script:ToolSchemaJsonCache[$t.function.name] = ($t | ConvertTo-Json -Depth 10 -Compress)
     }
 
+    Save-ToolSchemaCache -Fingerprint $fingerprint -Schemas $unique -SchemaJson $script:ToolSchemaJsonCache
+
     Write-MatrixLog -Message "Tools ready: $($unique.Count) ($(($unique | ForEach-Object { $_.function.name } | Sort-Object) -join ', '))"
     return $script:ToolCache
 }
 
-# Returns a compact catalog string — one "ToolName: description" line per tool,
-# sorted alphabetically. Injected into the system prompt so the LLM always knows
-# what tools exist, even when only a subset of full schemas is loaded.
 function Get-MatrixToolCatalog {
     if (-not $script:ToolCache) { return "" }
     return ($script:ToolCache |
@@ -150,10 +201,6 @@ function Get-MatrixToolCatalog {
     ) -join "`n"
 }
 
-# Selects the most relevant tool schemas for a given user message using keyword
-# scoring against tool name components and description words. CoreTools are always
-# included. Selection respects both a token budget and a count cap.
-# Returns: [array] of Ollama-compatible tool schema hashtables.
 function Select-MatrixTools {
     param(
         [string]   $UserMessage    = "",
@@ -164,10 +211,8 @@ function Select-MatrixTools {
 
     if (-not $script:ToolCache -or $script:ToolCache.Count -eq 0) { return @() }
 
-    # Convert token budget to char budget (~3.5 chars per token)
     $charBudget = [math]::Floor($MaxTokenBudget * 3.5)
 
-    # Extract unique meaningful words (>2 chars) from the user message
     $words = @()
     if (-not [string]::IsNullOrWhiteSpace($UserMessage)) {
         $words = ($UserMessage -split '\W+') |
@@ -176,12 +221,10 @@ function Select-MatrixTools {
                  Select-Object -Unique
     }
 
-    # Score each tool by keyword relevance
     $scored = foreach ($tool in $script:ToolCache) {
         $name    = $tool.function.name
         $descLow = $tool.function.description.ToLower()
 
-        # Split "Get-Weather" → ["get","weather"], "Invoke-ShellCommand" → ["invoke","shell","command"]
         $nameParts = @()
         foreach ($seg in ($name -split '-')) {
             [regex]::Matches($seg, '[A-Z][a-z]*|[0-9]+') | ForEach-Object { $nameParts += $_.Value.ToLower() }
@@ -198,11 +241,11 @@ function Select-MatrixTools {
         [PSCustomObject]@{ Tool = $tool; Name = $name; Score = $score }
     }
 
-    $selected    = [System.Collections.Generic.List[hashtable]]::new()
+    # Use List[object] to accept both hashtables (live cache) and PSCustomObjects (disk cache)
+    $selected    = [System.Collections.Generic.List[object]]::new()
     $usedChars   = 0
     $selectedSet = @{}
 
-    # Pass 1: CoreTools — always included regardless of budget
     foreach ($coreName in $CoreTools) {
         if ($selectedSet[$coreName]) { continue }
         $entry = $script:ToolCache | Where-Object { $_.function.name -eq $coreName } | Select-Object -First 1
@@ -213,7 +256,6 @@ function Select-MatrixTools {
         $selectedSet[$coreName] = $true
     }
 
-    # Pass 2: top-scored tools within budget and count cap
     foreach ($item in ($scored | Sort-Object @{ Expression = 'Score'; Descending = $true }, @{ Expression = 'Name'; Ascending = $true })) {
         if ($selected.Count -ge $MaxCount) { break }
         if ($selectedSet[$item.Name]) { continue }

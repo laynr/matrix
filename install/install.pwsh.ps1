@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 
 $RELEASE_ZIP = if ($env:MATRIX_RELEASE_ZIP) { $env:MATRIX_RELEASE_ZIP } else { "https://github.com/laynr/matrix/releases/download/latest/matrix-release.zip" }
 $INSTALL_DIR = if ($env:MATRIX_HOME) { $env:MATRIX_HOME } else { Join-Path $HOME ".matrix" }
-$MODEL       = if ($env:MATRIX_MODEL) { $env:MATRIX_MODEL } else { "gemma4:latest" }
+$MODEL       = if ($env:MATRIX_MODEL) { $env:MATRIX_MODEL } else { "qwen3:4b" }
 
 function Write-Ok   { param($m) Write-Host "  [ok]    $m" -ForegroundColor Green }
 function Write-Info { param($m) Write-Host "  [setup] $m" -ForegroundColor Cyan }
@@ -79,6 +79,16 @@ function Install-Ollama {
 
 if (Get-Command ollama -EA SilentlyContinue) {
     Write-Ok "Ollama: $(ollama --version 2>$null | Select-Object -First 1)"
+    # Upgrade Ollama when the installed version is too old to pull current models.
+    # Parse "ollama version X.Y.Z" and require at least 0.9.0.
+    $verLine = (ollama --version 2>$null | Select-Object -First 1) -replace '[^\d.]'
+    $parts   = $verLine -split '\.'
+    $tooOld  = try { [int]$parts[0] -eq 0 -and [int]$parts[1] -lt 9 } catch { $false }
+    if ($tooOld) {
+        Write-Warn "Ollama is outdated ($verLine) — upgrading..."
+        Install-Ollama
+        Write-Ok "Ollama updated: $(ollama --version 2>$null | Select-Object -First 1)"
+    }
 } else {
     Write-Warn "Ollama not found — installing..."
     Install-Ollama
@@ -204,7 +214,7 @@ exec pwsh -NoProfile -ExecutionPolicy Bypass -File "$matrixScript" "`$@"
 # ── Done ─────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "  ✓ Setup complete. Run 'matrix' anytime." -ForegroundColor Green
-Write-Host "  Override model: MATRIX_MODEL=gemma4:27b matrix"
+Write-Host "  Override model: MATRIX_MODEL=qwen3:8b matrix"
 if (-not $IsWindows) {
     $addedToProfile = $false
     foreach ($p in @("$HOME/.zshrc", "$HOME/.bash_profile", "$HOME/.profile")) {
