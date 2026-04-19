@@ -13,17 +13,39 @@ function Get-SystemRamGB {
     }
 }
 
-# Walks ModelTiers top-down and returns the best model that fits available RAM.
+# Returns base names of all models currently pulled in Ollama.
+function Get-OllamaModels {
+    try {
+        $lines = & ollama list 2>$null | Select-Object -Skip 1
+        return @($lines | ForEach-Object { ($_ -split '\s+')[0] } | Where-Object { $_ })
+    } catch { return @() }
+}
+
+# Walks ModelTiers top-down, picking the best model that fits available RAM AND
+# is already pulled in Ollama. Falls back to the first installed model if none
+# of the tiers match, then to qwen3:4b as a last resort.
 # Skipped entirely when the user has pinned a model in config.json.
 function Select-MatrixModel {
     param([hashtable]$Config)
-    $ramGB = Get-SystemRamGB
+    $ramGB     = Get-SystemRamGB
+    $installed = Get-OllamaModels
+
     foreach ($tier in ($Config.ModelTiers | Sort-Object { $_.MinRamGB } -Descending)) {
-        if ($ramGB -ge $tier.MinRamGB) {
+        if ($ramGB -lt $tier.MinRamGB) { continue }
+        # If Ollama isn't reachable yet, trust RAM fit and return the tier model
+        if ($installed.Count -eq 0) { return $tier.Model }
+        $base = $tier.Model.Split(":")[0]
+        if ($installed | Where-Object { $_ -match "^$([regex]::Escape($base))" }) {
             return $tier.Model
         }
     }
-    return "llama3.2:3b"
+
+    # No tier model is installed — use whatever is available, or fall back to default
+    if ($installed.Count -gt 0) {
+        Write-MatrixLog -Level "WARN" -Message "No tier model installed; using first available: $($installed[0])"
+        return $installed[0]
+    }
+    return "qwen3:4b"
 }
 
 function Load-Config {
