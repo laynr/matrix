@@ -58,6 +58,7 @@ function Get-MatrixTools {
     $root     = if ($global:MatrixRoot) { $global:MatrixRoot } else { Split-Path -Parent $PSScriptRoot }
     $toolsDir = Join-Path $root "tools"
 
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
     Write-MatrixLog -Message "Scanning tools in: $toolsDir"
 
     if (-not (Test-Path $toolsDir)) {
@@ -76,7 +77,8 @@ function Get-MatrixTools {
              ($scripts | Where-Object { $script:ToolCacheMtime[$_.BaseName] -ne $_.LastWriteTime })
 
     if (-not $dirty -and $script:ToolCache) {
-        Write-MatrixLog -Message "Tool cache hit ($($script:ToolCache.Count) tools)"
+        $sw.Stop(); $ms = $sw.ElapsedMilliseconds
+        Write-MatrixLog -Message "Tool cache hit ($($script:ToolCache.Count) tools) — ${ms}ms (memory)"
         return $script:ToolCache
     }
 
@@ -92,7 +94,8 @@ function Get-MatrixTools {
                 $script:ToolSchemaJsonCache[$_.Name] = $_.Value
             }
         }
-        Write-MatrixLog -Message "Tool disk cache hit ($($script:ToolCache.Count) tools)"
+        $sw.Stop(); $ms = $sw.ElapsedMilliseconds
+        Write-MatrixLog -Message "Tool disk cache hit ($($script:ToolCache.Count) tools) — ${ms}ms"
         return $script:ToolCache
     }
 
@@ -189,7 +192,8 @@ function Get-MatrixTools {
 
     Save-ToolSchemaCache -Fingerprint $fingerprint -Schemas $unique -SchemaJson $script:ToolSchemaJsonCache
 
-    Write-MatrixLog -Message "Tools ready: $($unique.Count) ($(($unique | ForEach-Object { $_.function.name } | Sort-Object) -join ', '))"
+    $sw.Stop(); $ms = $sw.ElapsedMilliseconds
+    Write-MatrixLog -Message "Tools ready: $($unique.Count) ($(($unique | ForEach-Object { $_.function.name } | Sort-Object) -join ', ')) — rebuilt in ${ms}ms"
     return $script:ToolCache
 }
 

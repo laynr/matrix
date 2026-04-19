@@ -348,6 +348,192 @@ $emptyCatalog = Get-MatrixToolCatalog
 Assert-True "empty cache returns empty catalog" ([string]::IsNullOrWhiteSpace($emptyCatalog))
 $null = Get-MatrixTools   # restore
 
+# ── Model auto-selection (Select-MatrixModel) ─────────────────────────────────
+# Guards against: selecting a model that isn't pulled in Ollama (produces 404),
+# RAM detection failures, and tier ordering bugs.
+
+Start-Suite "Model auto-selection"
+
+. (Join-Path $global:MatrixRoot "lib" "Config.ps1")
+
+$fakeTiers = @{
+    ModelTiers = @(
+        @{ MinRamGB = 20; Model = "qwen3:8b"    }
+        @{ MinRamGB = 12; Model = "qwen2.5:7b"  }
+        @{ MinRamGB = 6;  Model = "qwen3:4b"    }
+        @{ MinRamGB = 0;  Model = "llama3.2:3b" }
+    )
+}
+
+# RAM fits top tier AND top-tier model is installed
+function Get-SystemRamGB { return 24 }
+function Get-OllamaModels { return @("qwen3:8b:latest") }
+Assert-Equal "24 GB + qwen3:8b installed → qwen3:8b" "qwen3:8b" (Select-MatrixModel -Config $fakeTiers)
+
+# RAM fits top tier but top-tier model NOT installed — fall to next installed tier
+function Get-SystemRamGB { return 24 }
+function Get-OllamaModels { return @("qwen2.5:7b:latest") }
+Assert-Equal "qwen3:8b missing → falls to qwen2.5:7b" "qwen2.5:7b" (Select-MatrixModel -Config $fakeTiers)
+
+# RAM only fits the 4b slot and it's installed
+function Get-SystemRamGB { return 8 }
+function Get-OllamaModels { return @("qwen3:4b:latest") }
+Assert-Equal "8 GB + qwen3:4b installed → qwen3:4b" "qwen3:4b" (Select-MatrixModel -Config $fakeTiers)
+
+# Ollama not reachable (empty list) — trust RAM fit, don't 404-proof-loop forever
+function Get-SystemRamGB { return 16 }
+function Get-OllamaModels { return @() }
+Assert-Equal "Ollama unreachable → trust RAM (qwen2.5:7b)" "qwen2.5:7b" (Select-MatrixModel -Config $fakeTiers)
+
+# No tier model is installed but something unrecognised is — return it rather than 404
+function Get-SystemRamGB { return 16 }
+function Get-OllamaModels { return @("some-random-model:latest") }
+Assert-Equal "no tier model → first installed" "some-random-model:latest" (Select-MatrixModel -Config $fakeTiers)
+
+# Very low RAM — only the MinRamGB=0 tier qualifies; model is installed
+function Get-SystemRamGB { return 2 }
+function Get-OllamaModels { return @("llama3.2:3b:latest") }
+Assert-Equal "2 GB + llama3.2:3b installed → llama3.2:3b" "llama3.2:3b" (Select-MatrixModel -Config $fakeTiers)
+
+# Get-SystemRamGB returns a positive integer on this platform
+function Get-SystemRamGB {
+    try {
+        if ($IsWindows) {
+            return [math]::Round((Get-CimInstance Win32_ComputerSystem -EA Stop).TotalPhysicalMemory / 1GB)
+        } elseif ($IsMacOS) {
+            return [math]::Round([long](& sysctl -n hw.memsize) / 1GB)
+        } else {
+            $kb = [long](((Get-Content /proc/meminfo -EA Stop) -match '^MemTotal:') -replace '[^\d]')
+            return [math]::Round($kb / 1MB)
+        }
+    } catch { return 8 }
+}
+$detectedRam = Get-SystemRamGB
+Assert-True "Get-SystemRamGB returns positive number" ($detectedRam -gt 0)
+
+# ── Disk schema cache ─────────────────────────────────────────────────────────
+# Guards against: cache not being written, stale cache serving wrong schemas,
+# Reset-ToolCache not clearing the disk file.
+
+Start-Suite "Disk schema cache"
+
+$cachePath = Join-Path $global:MatrixRoot "tools" ".schema-cache.json"
+
+# Warm the cache — populates both memory and disk
+Reset-ToolCache
+$tools = Get-MatrixTools
+Assert-True  "cache file created after Get-MatrixTools"  (Test-Path $cachePath)
+
+$cached = Get-Content $cachePath -Raw | ConvertFrom-Json
+Assert-True  "cache has fingerprint"                     ($null -ne $cached.fingerprint)
+Assert-True  "cache has schemas"                         ($cached.schemas -and $cached.schemas.Count -gt 0)
+Assert-Equal "cached count matches live count"           $tools.Count  $cached.schemas.Count
+
+# Disk cache hit: clear in-memory cache but leave disk cache; reload must succeed
+$script:ToolCache      = $null
+$script:ToolCacheMtime = @{}
+$reloaded = Get-MatrixTools
+Assert-Equal "disk cache hit returns correct count"      $tools.Count  $reloaded.Count
+
+# Reset clears the disk file
+Reset-ToolCache
+Assert-True  "Reset-ToolCache deletes disk cache"        (-not (Test-Path $cachePath))
+
+# Rebuild recreates the disk file
+$null = Get-MatrixTools
+Assert-True  "rebuild recreates disk cache file"         (Test-Path $cachePath)
+
+# Disk cache is invalidated when a new tool is added
+$script:ToolCache      = $null
+$script:ToolCacheMtime = @{}
+$tmpTool = Join-Path $global:MatrixRoot "tools" "_CacheTest_$(Get-Random).ps1"
+@"
+<#
+.SYNOPSIS
+Temporary cache invalidation test tool.
+#>
+[CmdletBinding()]
+param()
+return @{ ok = `$true } | ConvertTo-Json -Compress
+"@ | Set-Content $tmpTool -Encoding UTF8
+$afterAdd = Get-MatrixTools
+Assert-Equal "new tool invalidates disk cache and is discovered"  ($tools.Count + 1)  $afterAdd.Count
+Remove-Item $tmpTool -Force -EA SilentlyContinue
+
+# Rebuild after removal restores original count
+Reset-ToolCache
+$afterRemove = Get-MatrixTools
+Assert-Equal "count restored after temp tool removed"  $tools.Count  $afterRemove.Count
+
+# ── Load-ToolSchemaCache edge cases ──────────────────────────────────────────
+
+Start-Suite "Load-ToolSchemaCache edge cases"
+
+$cachePath2 = Join-Path $global:MatrixRoot "tools" ".schema-cache.json"
+$origCache  = if (Test-Path $cachePath2) { Get-Content $cachePath2 -Raw } else { $null }
+
+try {
+    # Corrupt JSON → returns $null
+    "{ this is not valid json !!!" | Set-Content $cachePath2 -Encoding UTF8
+    $result = Load-ToolSchemaCache -Fingerprint @{ "toolA" = "2024-01-01T00:00:00" }
+    Assert-True "Corrupt JSON returns null" ($null -eq $result)
+
+    # Missing fingerprint property → returns $null
+    @{ schemas = @() } | ConvertTo-Json | Set-Content $cachePath2 -Encoding UTF8
+    $result = Load-ToolSchemaCache -Fingerprint @{ "toolA" = "2024-01-01T00:00:00" }
+    Assert-True "Missing fingerprint returns null" ($null -eq $result)
+
+    # Tool count mismatch (caller has 2 keys, disk has 1) → returns $null
+    @{ fingerprint = @{ toolA = "t1" }; schemas = @() } | ConvertTo-Json -Depth 5 | Set-Content $cachePath2 -Encoding UTF8
+    $result = Load-ToolSchemaCache -Fingerprint @{ toolA = "t1"; toolB = "t2" }
+    Assert-True "Count mismatch returns null" ($null -eq $result)
+
+    # Mtime value mismatch → returns $null
+    @{ fingerprint = @{ toolA = "OLD-MTIME" }; schemas = @() } | ConvertTo-Json -Depth 5 | Set-Content $cachePath2 -Encoding UTF8
+    $result = Load-ToolSchemaCache -Fingerprint @{ toolA = "NEW-MTIME" }
+    Assert-True "Mtime mismatch returns null" ($null -eq $result)
+} finally {
+    if ($null -ne $origCache) { $origCache | Set-Content $cachePath2 -Encoding UTF8 -NoNewline }
+    elseif (Test-Path $cachePath2) { Remove-Item $cachePath2 -Force -EA SilentlyContinue }
+}
+
+# ── Reset-ToolCache state verification ───────────────────────────────────────
+
+Start-Suite "Reset-ToolCache — state verification"
+
+$null = Get-MatrixTools   # warm cache
+Reset-ToolCache
+Assert-True  "ToolCache is null after Reset" ($null -eq $script:ToolCache)
+Assert-Equal "ToolCacheMtime is empty after Reset" 0 $script:ToolCacheMtime.Count
+
+# Second Reset with no disk file must not throw
+Reset-ToolCache
+Assert-True "Second Reset-ToolCache does not throw" $true
+
+$null = Get-MatrixTools   # restore
+
+# ── RunspacePool ISS sanity ───────────────────────────────────────────────────
+# Guards against the [void] bug where Add() return values polluted the function
+# output, causing Get-MatrixRunspacePool to return Object[] instead of a pool.
+
+Start-Suite "RunspacePool ISS type safety"
+
+$pool  = Get-MatrixRunspacePool
+$pool2 = Get-MatrixRunspacePool
+Assert-True "Get-MatrixRunspacePool returns a RunspacePool (not Object[])" `
+    ($pool -is [System.Management.Automation.Runspaces.RunspacePool])
+Assert-Equal "RunspacePool state is Opened" "Opened" $pool.RunspacePoolStateInfo.State.ToString()
+Assert-True  "Second call returns same pool object" ([object]::ReferenceEquals($pool, $pool2))
+Assert-Equal "Pool MinRunspaces = 1" 1 $pool.GetMinRunspaces()
+Assert-Equal "Pool MaxRunspaces = 8" 8 $pool.GetMaxRunspaces()
+
+# Dispatch a real tool through the ISS pool to confirm libs pre-loaded correctly
+$issMsg = New-ToolCallMessage -ToolName "Get-Time" -Arguments @{}
+$issRes  = Invoke-MatrixToolchain -Message $issMsg
+Assert-True  "ISS pool dispatches tools correctly"  $issRes.HasTools
+Assert-True  "ISS pool tool result is valid JSON" `
+    ($null -ne ($issRes.ToolResults[0].content | ConvertFrom-Json -EA SilentlyContinue))
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 $failed = Show-TestSummary
 exit $failed

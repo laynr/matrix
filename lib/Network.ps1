@@ -32,7 +32,10 @@ function Get-MatrixRunspacePool {
         [void]$iss.StartupScripts.Add((Join-Path $global:MatrixRoot 'lib' 'ToolManager.ps1'))
 
         $pool = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool(1, 8, $iss, $Host)
+        $swPool = [System.Diagnostics.Stopwatch]::StartNew()
         $pool.Open()
+        $swPool.Stop()
+        Write-MatrixLog -Message "RunspacePool opened (ISS startup scripts loaded) — $($swPool.ElapsedMilliseconds)ms"
         $script:ToolRunspacePool = $pool
     }
     return $script:ToolRunspacePool
@@ -482,15 +485,17 @@ function Invoke-MatrixToolchain {
 
     # Collect results in original order
     foreach ($rs in $runspaceList) {
+        $tswTool = [System.Diagnostics.Stopwatch]::StartNew()
         $raw = try {
             ($rs.PS.EndInvoke($rs.Handle) | Out-String).Trim()
         } catch {
             @{ error = $_.Exception.Message } | ConvertTo-Json -Compress
         }
+        $tswTool.Stop()
         $rs.PS.Dispose()
 
         $truncated = Limit-ToolResult $raw
-        Write-MatrixLog -Message "Tool result ($($rs.Name)): $truncated"
+        Write-MatrixLog -Message "Tool result ($($rs.Name)) elapsed=$($tswTool.ElapsedMilliseconds)ms: $truncated"
         $isError = $truncated -match '"error"\s*:'
         $icon    = if ($isError) { "✗" } else { "✓" }
         $color   = if ($isError) { "Red" } else { "DarkGreen" }

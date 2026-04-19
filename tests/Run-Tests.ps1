@@ -12,7 +12,7 @@
 
 param(
     [switch]$SchemaOnly,
-    [ValidateSet("All","Install","Tools","MultiTool","LiveAgent")]
+    [ValidateSet("All","Install","Tools","MultiTool","Config","LiveAgent")]
     [string]$Suite = "All"
 )
 
@@ -81,6 +81,9 @@ if ($Suite -in @("All","Tools")) {
 }
 if ($Suite -in @("All","MultiTool")) {
     Run-Suite "Multi-Tool Integration" (Join-Path $testsDir "Test-MultiTool.ps1")
+}
+if ($Suite -in @("All","Config","MultiTool") -or $SchemaOnly) {
+    Run-Suite "Config Unit Tests" (Join-Path $testsDir "Test-Config.ps1")
 }
 if (-not $SchemaOnly -and $Suite -in @("All","LiveAgent")) {
     Run-Suite "Live Agent" (Join-Path $testsDir "Test-LiveAgent.ps1")

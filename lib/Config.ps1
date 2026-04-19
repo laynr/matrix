@@ -27,24 +27,32 @@ function Get-OllamaModels {
 # Skipped entirely when the user has pinned a model in config.json.
 function Select-MatrixModel {
     param([hashtable]$Config)
+    $sw        = [System.Diagnostics.Stopwatch]::StartNew()
     $ramGB     = Get-SystemRamGB
-    $installed = Get-OllamaModels
+    $installed = @(Get-OllamaModels)
 
     foreach ($tier in ($Config.ModelTiers | Sort-Object { $_.MinRamGB } -Descending)) {
         if ($ramGB -lt $tier.MinRamGB) { continue }
-        # If Ollama isn't reachable yet, trust RAM fit and return the tier model
-        if ($installed.Count -eq 0) { return $tier.Model }
+        if ($installed.Count -eq 0) {
+            $sw.Stop(); $ms = $sw.ElapsedMilliseconds
+            Write-MatrixLog -Message "Select-MatrixModel: $($tier.Model) (Ollama unreachable, RAM fit) ramGB=$ramGB — ${ms}ms"
+            return $tier.Model
+        }
         $base = $tier.Model.Split(":")[0]
         if ($installed | Where-Object { $_ -match "^$([regex]::Escape($base))" }) {
+            $sw.Stop(); $ms = $sw.ElapsedMilliseconds
+            Write-MatrixLog -Message "Select-MatrixModel: $($tier.Model) (tier match MinRamGB=$($tier.MinRamGB)) ramGB=$ramGB — ${ms}ms"
             return $tier.Model
         }
     }
 
-    # No tier model is installed — use whatever is available, or fall back to default
     if ($installed.Count -gt 0) {
-        Write-MatrixLog -Level "WARN" -Message "No tier model installed; using first available: $($installed[0])"
+        $sw.Stop(); $ms = $sw.ElapsedMilliseconds
+        Write-MatrixLog -Level "WARN" -Message "Select-MatrixModel: $($installed[0]) (no tier installed) ramGB=$ramGB — ${ms}ms"
         return $installed[0]
     }
+    $sw.Stop(); $ms = $sw.ElapsedMilliseconds
+    Write-MatrixLog -Level "WARN" -Message "Select-MatrixModel: qwen3:4b (nothing installed) ramGB=$ramGB — ${ms}ms"
     return "qwen3:4b"
 }
 
